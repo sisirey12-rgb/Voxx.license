@@ -127,4 +127,41 @@ router.post('/revoke', async (req, res) => {
   res.json({ success: true });
 });
 
+// Permanently delete one key (and its device-binding history)
+router.post('/delete-key', async (req, res) => {
+  const { license_key } = req.body || {};
+  if (!license_key) return res.status(400).json({ error: 'license_key required' });
+
+  await db.execute({ sql: 'DELETE FROM license_devices WHERE license_key = ?', args: [license_key] });
+  const result = await db.execute({ sql: 'DELETE FROM licenses WHERE license_key = ?', args: [license_key] });
+  if (result.rowsAffected === 0) return res.status(404).json({ error: 'license_key not found' });
+
+  res.json({ success: true });
+});
+
+// Permanently delete every revoked key (leaves active/expiring/expired keys alone)
+router.post('/delete-revoked', async (req, res) => {
+  await db.execute(`
+    DELETE FROM license_devices WHERE license_key IN (
+      SELECT license_key FROM licenses WHERE status = 'revoked'
+    )
+  `);
+  const result = await db.execute(`DELETE FROM licenses WHERE status = 'revoked'`);
+
+  res.json({ success: true, deleted: result.rowsAffected });
+});
+
+// Permanently delete EVERY key, regardless of status. Requires an explicit confirm flag.
+router.post('/delete-all', async (req, res) => {
+  const { confirm } = req.body || {};
+  if (confirm !== true) {
+    return res.status(400).json({ error: 'confirm must be true to delete all keys' });
+  }
+
+  await db.execute('DELETE FROM license_devices');
+  const result = await db.execute('DELETE FROM licenses');
+
+  res.json({ success: true, deleted: result.rowsAffected });
+});
+
 module.exports = router;
