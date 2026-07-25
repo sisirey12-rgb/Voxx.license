@@ -85,7 +85,7 @@ router.post('/extend', async (req, res) => {
   res.json({ success: true, expires_at: newExpiry });
 });
 
-// Regenerate — revokes the old key and issues a fresh one with the same settings
+// Regenerate — swaps in a new key string on the same entry (keeps expiry, label, device limit)
 router.post('/regenerate', async (req, res) => {
   const { license_key } = req.body || {};
   if (!license_key) return res.status(400).json({ error: 'license_key required' });
@@ -98,14 +98,17 @@ router.post('/regenerate', async (req, res) => {
   if (!old) return res.status(404).json({ error: 'license_key not found' });
 
   const newKey = generateKeyString();
+
+  // Update the same row's key in place — no duplicate/orphaned entry left behind.
   await db.execute({
-    sql: `
-      INSERT INTO licenses (license_key, device_hwid, label, created_at, expires_at, max_devices, status)
-      VALUES (?, NULL, ?, ?, ?, ?, 'active')
-    `,
-    args: [newKey, old.label, nowISO(), old.expires_at, old.max_devices],
+    sql: 'UPDATE licenses SET license_key = ? WHERE license_key = ?',
+    args: [newKey, license_key],
   });
-  await db.execute({ sql: `UPDATE licenses SET status = 'revoked' WHERE license_key = ?`, args: [license_key] });
+  // Keep any bound-device history pointed at the new key string.
+  await db.execute({
+    sql: 'UPDATE license_devices SET license_key = ? WHERE license_key = ?',
+    args: [newKey, license_key],
+  });
 
   res.json({ success: true, new_license_key: newKey });
 });
