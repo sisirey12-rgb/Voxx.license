@@ -1,8 +1,8 @@
 const crypto = require('crypto');
 
 function generateKeyString() {
-  const group = () => crypto.randomBytes(4).toString('hex').toUpperCase();
-  return [group(), group(), group(), group()].join('-');
+  const suffix = crypto.randomBytes(5).toString('hex').toUpperCase();
+  return `VOXX-${suffix}`;
 }
 
 function addDaysISO(fromISO, days) {
