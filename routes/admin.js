@@ -15,7 +15,7 @@ router.get('/keys', (req, res) => {
 
 // Generate a new key
 router.post('/generate-key', (req, res) => {
-  const { validity_days = 30, max_devices = 1, label = null } = req.body || {};
+  const { validity_days = 30, max_devices = 1, label = null, license_key: customKey } = req.body || {};
 
   if (!Number.isFinite(Number(validity_days)) || Number(validity_days) <= 0) {
     return res.status(400).json({ error: 'validity_days must be a positive number' });
@@ -24,7 +24,14 @@ router.post('/generate-key', (req, res) => {
     return res.status(400).json({ error: 'max_devices must be a positive number' });
   }
 
-  const license_key = generateKeyString();
+  if (customKey) {
+    const existing = db.prepare('SELECT 1 FROM licenses WHERE license_key = ?').get(customKey);
+    if (existing) {
+      return res.status(409).json({ error: 'license_key already exists' });
+    }
+  }
+
+  const license_key = customKey || generateKeyString();
   const created_at = nowISO();
   const expires_at = addDaysISO(created_at, validity_days);
 
