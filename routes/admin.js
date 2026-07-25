@@ -1,5 +1,5 @@
 const express = require('express');
-const db = require('../db');
+const { db } = require('../db');
 const adminAuth = require('../middleware/adminAuth');
 const { generateKeyString, addDaysISO, nowISO, computeStatus } = require('../helpers');
 
@@ -7,14 +7,14 @@ const router = express.Router();
 router.use(adminAuth);
 
 // List all keys (console dashboard)
-router.get('/keys', (req, res) => {
-  const rows = db.prepare('SELECT * FROM licenses ORDER BY created_at DESC').all();
-  const withStatus = rows.map(r => ({ ...r, computed_status: computeStatus(r) }));
+router.get('/keys', async (req, res) => {
+  const result = await db.execute('SELECT * FROM licenses ORDER BY created_at DESC');
+  const withStatus = result.rows.map(r => ({ ...r, computed_status: computeStatus(r) }));
   res.json({ licenses: withStatus });
 });
 
 // Generate a new key
-router.post('/generate-key', (req, res) => {
+router.post('/generate-key', async (req, res) => {
   const { validity_days = 30, max_devices = 1, label = null, license_key: customKey } = req.body || {};
 
   if (!Number.isFinite(Number(validity_days)) || Number(validity_days) <= 0) {
@@ -25,8 +25,11 @@ router.post('/generate-key', (req, res) => {
   }
 
   if (customKey) {
-    const existing = db.prepare('SELECT 1 FROM licenses WHERE license_key = ?').get(customKey);
-    if (existing) {
+    const existing = await db.execute({
+      sql: 'SELECT 1 FROM licenses WHERE license_key = ?',
+      args: [customKey],
+    });
+    if (existing.rows.length > 0) {
       return res.status(409).json({ error: 'license_key already exists' });
     }
   }
@@ -35,70 +38,88 @@ router.post('/generate-key', (req, res) => {
   const created_at = nowISO();
   const expires_at = addDaysISO(created_at, validity_days);
 
-  db.prepare(`
-    INSERT INTO licenses (license_key, device_hwid, label, created_at, expires_at, max_devices, status)
-    VALUES (?, NULL, ?, ?, ?, ?, 'active')
-  `).run(license_key, label, created_at, expires_at, max_devices);
+  await db.execute({
+    sql: `
+      INSERT INTO licenses (license_key, device_hwid, label, created_at, expires_at, max_devices, status)
+      VALUES (?, NULL, ?, ?, ?, ?, 'active')
+    `,
+    args: [license_key, label, created_at, expires_at, max_devices],
+  });
 
   res.json({ license_key, created_at, expires_at, max_devices, label, status: 'active' });
 });
 
-// Reset HWID — unbinds all devices from this key
-router.post('/reset-hwid', (req, res) => {
+// Reset HWID — frees the key up to be activated on a new device
+router.post('/reset-hwid', async (req, res) => {
   const { license_key } = req.body || {};
   if (!license_key) return res.status(400).json({ error: 'license_key required' });
 
-  const lic = db.prepare('SELECT * FROM licenses WHERE license_key = ?').get(license_key);
-  if (!lic) return res.status(404).json({ error: 'License not found' });
+  const result = await db.execute({
+    sql: 'SELECT * FROM licenses WHERE license_key = ?',
+    args: [license_key],
+  });
+  const lic = result.rows[0];
+  if (!lic) return res.status(404).json({ error: 'license_key not found' });
 
-  db.prepare('UPDATE licenses SET device_hwid = NULL WHERE license_key = ?').run(license_key);
-  db.prepare('DELETE FROM license_devices WHERE license_key = ?').run(license_key);
+  await db.execute({ sql: 'UPDATE licenses SET device_hwid = NULL WHERE license_key = ?', args: [license_key] });
+  await db.execute({ sql: 'DELETE FROM license_devices WHERE license_key = ?', args: [license_key] });
 
   res.json({ success: true });
 });
 
-// Extend validity by N days
-router.post('/extend', (req, res) => {
+// Extend expiry by N days
+router.post('/extend', async (req, res) => {
   const { license_key, days } = req.body || {};
   if (!license_key || !days) return res.status(400).json({ error: 'license_key and days required' });
 
-  const lic = db.prepare('SELECT * FROM licenses WHERE license_key = ?').get(license_key);
-  if (!lic) return res.status(404).json({ error: 'License not found' });
+  const result = await db.execute({
+    sql: 'SELECT * FROM licenses WHERE license_key = ?',
+    args: [license_key],
+  });
+  const lic = result.rows[0];
+  if (!lic) return res.status(404).json({ error: 'license_key not found' });
 
   const newExpiry = addDaysISO(lic.expires_at, days);
-  db.prepare('UPDATE licenses SET expires_at = ? WHERE license_key = ?').run(newExpiry, license_key);
+  await db.execute({ sql: 'UPDATE licenses SET expires_at = ? WHERE license_key = ?', args: [newExpiry, license_key] });
 
   res.json({ success: true, expires_at: newExpiry });
 });
 
-// Regenerate — revoke old key, issue a new one carrying over expiry/limits
-router.post('/regenerate', (req, res) => {
+// Regenerate — revokes the old key and issues a fresh one with the same settings
+router.post('/regenerate', async (req, res) => {
   const { license_key } = req.body || {};
   if (!license_key) return res.status(400).json({ error: 'license_key required' });
 
-  const old = db.prepare('SELECT * FROM licenses WHERE license_key = ?').get(license_key);
-  if (!old) return res.status(404).json({ error: 'License not found' });
+  const oldResult = await db.execute({
+    sql: 'SELECT * FROM licenses WHERE license_key = ?',
+    args: [license_key],
+  });
+  const old = oldResult.rows[0];
+  if (!old) return res.status(404).json({ error: 'license_key not found' });
 
   const newKey = generateKeyString();
-  const created_at = nowISO();
-
-  db.prepare(`
-    INSERT INTO licenses (license_key, device_hwid, label, created_at, expires_at, max_devices, status)
-    VALUES (?, NULL, ?, ?, ?, ?, 'active')
-  `).run(newKey, old.label, created_at, old.expires_at, old.max_devices);
-
-  db.prepare(`UPDATE licenses SET status = 'revoked' WHERE license_key = ?`).run(license_key);
+  await db.execute({
+    sql: `
+      INSERT INTO licenses (license_key, device_hwid, label, created_at, expires_at, max_devices, status)
+      VALUES (?, NULL, ?, ?, ?, ?, 'active')
+    `,
+    args: [newKey, old.label, nowISO(), old.expires_at, old.max_devices],
+  });
+  await db.execute({ sql: `UPDATE licenses SET status = 'revoked' WHERE license_key = ?`, args: [license_key] });
 
   res.json({ success: true, new_license_key: newKey });
 });
 
 // Revoke a key
-router.post('/revoke', (req, res) => {
+router.post('/revoke', async (req, res) => {
   const { license_key } = req.body || {};
   if (!license_key) return res.status(400).json({ error: 'license_key required' });
 
-  const result = db.prepare(`UPDATE licenses SET status = 'revoked' WHERE license_key = ?`).run(license_key);
-  if (result.changes === 0) return res.status(404).json({ error: 'License not found' });
+  const result = await db.execute({
+    sql: `UPDATE licenses SET status = 'revoked' WHERE license_key = ?`,
+    args: [license_key],
+  });
+  if (result.rowsAffected === 0) return res.status(404).json({ error: 'license_key not found' });
 
   res.json({ success: true });
 });
