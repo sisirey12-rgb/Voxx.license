@@ -151,17 +151,4 @@ router.post('/delete-revoked', async (req, res) => {
   res.json({ success: true, deleted: result.rowsAffected });
 });
 
-// Permanently delete EVERY key, regardless of status. Requires an explicit confirm flag.
-router.post('/delete-all', async (req, res) => {
-  const { confirm } = req.body || {};
-  if (confirm !== true) {
-    return res.status(400).json({ error: 'confirm must be true to delete all keys' });
-  }
-
-  await db.execute('DELETE FROM license_devices');
-  const result = await db.execute('DELETE FROM licenses');
-
-  res.json({ success: true, deleted: result.rowsAffected });
-});
-
 module.exports = router;
