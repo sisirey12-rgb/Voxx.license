@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 
+const { init } = require('./db');
 const adminRoutes = require('./routes/admin');
 const licenseRoutes = require('./routes/license');
 
@@ -17,6 +18,14 @@ app.use('/admin', adminRoutes);
 app.use('/api', licenseRoutes);
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`voxx-license-server listening on port ${PORT}`);
-});
+
+init()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`voxx-license-server listening on port ${PORT}`);
+    });
+  })
+  .catch(err => {
+    console.error('Failed to initialize database:', err);
+    process.exit(1);
+  });
