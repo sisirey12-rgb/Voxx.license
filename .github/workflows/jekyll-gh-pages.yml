@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VOXX — License Store</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#08080b;
+    --bg-glow: radial-gradient(60% 40% at 50% -10%, rgba(224,169,76,0.18), transparent 70%);
+    --panel:#131318;
+    --panel-border: rgba(255,255,255,0.11);
+    --amber:#eab35a;
+    --amber-soft: rgba(234,179,90,0.14);
+    --mint:#4ee0a0;
+    --text:#f7f6f2;
+    --text-dim:#a5a3ac;
+    --text-faint:#6b6971;
+    --mono: 'JetBrains Mono', monospace;
+    --display: 'Space Grotesk', sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background: var(--bg-glow), var(--bg);
+    color:var(--text);
+    font-family: var(--display);
+    -webkit-font-smoothing:antialiased;
+    padding: 0 0 80px;
+  }
+  .wrap{ max-width: 1040px; margin: 0 auto; padding: 48px 20px 0; }
+
+  .top-banner{
+    display:flex; align-items:center; justify-content:center; gap:10px;
+    background: linear-gradient(90deg, #1a1408, #16130a 50%, #1a1408);
+    border-bottom:1px solid rgba(234,179,90,0.25);
+    padding:11px 16px; text-align:center;
+    font-family:var(--mono); font-size:0.78rem; font-weight:600; letter-spacing:0.02em;
+    color:var(--amber); flex-wrap:wrap;
+  }
+  .top-banner strong{ color:var(--text); font-weight:700; }
+  .top-banner .sep{ color:var(--text-faint); }
+
+  /* Header */
+  .brand{ display:flex; align-items:center; gap:14px; margin-bottom: 46px; }
+  .join-tg{
+    margin-left:auto; display:flex; align-items:center; gap:7px;
+    text-decoration:none; color:var(--text-dim);
+    font-family:var(--mono); font-size:0.78rem; font-weight:500;
+    padding:9px 14px; border-radius:9px; border:1px solid var(--panel-border);
+    transition: color 0.15s ease, border-color 0.15s ease;
+  }
+  .join-tg svg{ width:14px; height:14px; }
+  .join-tg:hover{ color:var(--amber); border-color:rgba(224,169,76,0.35); }
+  @media (max-width:520px){ .brand{ flex-wrap:wrap; } .join-tg{ margin-left:56px; } }
+  .brand-mark{
+    width:42px;height:42px;border-radius:11px;
+    background: linear-gradient(155deg, #e0a94c, #b9812c);
+    display:flex;align-items:center;justify-content:center;
+    box-shadow: 0 4px 18px rgba(224,169,76,0.25);
+    flex-shrink:0;
+  }
+  .brand-mark svg{ width:18px; height:18px; }
+  .brand-name{ font-weight:700; font-size:1.15rem; letter-spacing:0.02em; }
+  .brand-sub{ color:var(--text-dim); font-size:0.82rem; font-family:var(--mono); letter-spacing:0.03em; }
+
+  .apk-banner{
+    display:flex; align-items:center; gap:10px;
+    background: linear-gradient(90deg, rgba(224,169,76,0.14), rgba(224,169,76,0.05));
+    border:1px solid rgba(224,169,76,0.3);
+    border-radius:12px; padding:13px 18px; margin-bottom:32px;
+    text-decoration:none; color:var(--amber);
+    font-family:var(--mono); font-size:0.84rem; font-weight:600;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  .apk-banner svg{ width:16px; height:16px; flex-shrink:0; }
+  .apk-banner .apk-arrow{ margin-left:auto; transition: transform 0.15s ease; }
+  .apk-banner:hover{ border-color: rgba(224,169,76,0.55); background: linear-gradient(90deg, rgba(224,169,76,0.2), rgba(224,169,76,0.07)); }
+  .apk-banner:hover .apk-arrow{ transform: translateX(3px); }
+  @media (max-width:520px){ .apk-banner span:not(.apk-arrow){ font-size:0.78rem; } }
+
+  .hero{ margin-bottom: 52px; }
+  .eyebrow{
+    font-family: var(--mono); font-size:0.72rem; letter-spacing:0.16em; text-transform:uppercase;
+    color:var(--amber); margin-bottom:14px; display:flex; align-items:center; gap:8px;
+  }
+  .eyebrow::before{ content:''; width:6px; height:6px; border-radius:50%; background:var(--mint); box-shadow:0 0 8px var(--mint); }
+  h1{ font-size: clamp(1.9rem, 4vw, 2.6rem); font-weight:700; margin:0 0 12px; letter-spacing:-0.01em; line-height:1.15; }
+  .hero p{ color:var(--text-dim); font-size:1rem; max-width:520px; line-height:1.55; margin:0; }
+
+  /* Pricing grid */
+  .grid{
+    display:grid; grid-template-columns: repeat(4, 1fr); gap:18px;
+  }
+  @media (max-width: 1000px){ .grid{ grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 700px){ .grid{ grid-template-columns: 1fr; } }
+
+  .card{
+    background: linear-gradient(180deg, #16161d, var(--panel));
+    border:1px solid var(--panel-border);
+    border-radius:18px;
+    padding: 28px 24px 24px;
+    position:relative;
+    overflow:hidden;
+    display:flex; flex-direction:column;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.03) inset, 0 20px 40px -24px rgba(0,0,0,0.6);
+    transition: border-color 0.2s ease, transform 0.2s ease;
+  }
+  .card:hover{ border-color: rgba(255,255,255,0.14); transform: translateY(-2px); }
+  .card.featured{
+    border-color: rgba(224,169,76,0.45);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.03) inset, 0 24px 48px -20px rgba(224,169,76,0.18);
+  }
+  .card.featured:hover{ border-color: rgba(224,169,76,0.7); }
+  .card.featured::before{
+    content:''; position:absolute; top:0; left:0; right:0; height:2px;
+    background: linear-gradient(90deg, transparent, var(--amber), transparent);
+  }
+  .card.reseller{
+    border-color: rgba(62,207,142,0.4);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.03) inset, 0 24px 48px -20px rgba(62,207,142,0.16);
+  }
+  .card.reseller:hover{ border-color: rgba(62,207,142,0.65); }
+  .card.reseller::before{
+    content:''; position:absolute; top:0; left:0; right:0; height:2px;
+    background: linear-gradient(90deg, transparent, var(--mint), transparent);
+  }
+  .card.reseller .price-primary{ color: var(--mint); font-size:1.3rem; }
+  .card.reseller .tier-tag{ color: var(--mint); }
+  .card.reseller .buy-btn{
+    background: rgba(62,207,142,0.12); color: var(--mint);
+    border-color: rgba(62,207,142,0.35);
+  }
+  .card.reseller .price-list li::before{ content:'✓'; color:var(--mint); font-weight:600; margin-right:8px; }
+  .card.reseller .price-list .place{ gap:0; }
+
+  @media (prefers-reduced-motion: reduce){ .card{ transition:none; } .card:hover{ transform:none; } }
+  .tier-tag{
+    font-family:var(--mono); font-size:0.7rem; letter-spacing:0.1em; text-transform:uppercase;
+    color:var(--text-faint); margin-bottom:10px;
+  }
+  .tier-name{ font-size:1.3rem; font-weight:700; margin-bottom:4px; }
+  .tier-desc{ color:var(--text-dim); font-size:0.85rem; margin-bottom:22px; }
+
+  .price-primary{
+    font-family: var(--mono); font-weight:700; font-size:2.1rem; line-height:1;
+    color:var(--text); margin-bottom:2px;
+  }
+  .price-primary .cur{ font-size:1.05rem; color:var(--amber); margin-right:4px; vertical-align:2px; }
+  .price-primary-label{
+    font-family:var(--mono); font-size:0.72rem; color:var(--text-faint); margin-bottom:20px; letter-spacing:0.03em;
+  }
+
+  .divider-label{
+    font-family:var(--mono); font-size:0.68rem; letter-spacing:0.08em; text-transform:uppercase;
+    color:var(--text-faint); border-top:1px solid var(--panel-border); padding-top:16px; margin-bottom:12px;
+  }
+  .price-list{ list-style:none; margin:0 0 24px; padding:0; display:flex; flex-direction:column; gap:9px; flex-grow:1; }
+  .price-list li{
+    display:flex; align-items:center; justify-content:space-between;
+    font-family:var(--mono); font-size:0.86rem; color:var(--text-dim);
+  }
+  .price-list .place{ display:flex; align-items:center; gap:8px; }
+  .price-list .flag{ font-size:1rem; }
+  .price-list .val{ color:var(--text); font-weight:500; }
+  .price-list .code{ color:var(--text-faint); font-size:0.72rem; margin-left:4px; }
+
+  .buy-row{ display:flex; gap:8px; }
+  .buy-btn{
+    flex:1; display:flex; align-items:center; justify-content:center; gap:7px;
+    text-align:center; text-decoration:none;
+    background: var(--amber-soft); color:var(--amber);
+    border:1px solid rgba(224,169,76,0.35);
+    font-family:var(--mono); font-weight:600; font-size:0.82rem;
+    padding:12px 8px; border-radius:10px;
+    transition: background 0.15s ease, transform 0.15s ease;
+  }
+  .card.featured .buy-btn{
+    background: var(--amber); color:#1a1206; border-color:transparent;
+    box-shadow: 0 6px 16px -6px rgba(224,169,76,0.5);
+  }
+  .buy-btn:hover{ transform: translateY(-1px); }
+  .buy-btn:focus-visible{ outline:2px solid var(--mint); outline-offset:2px; }
+  .buy-btn svg{ width:14px; height:14px; flex-shrink:0; }
+
+  .note{
+    margin-top:36px; padding:16px 18px; border-radius:12px;
+    background: rgba(255,255,255,0.025); border:1px solid var(--panel-border);
+    color:var(--text-faint); font-size:0.8rem; line-height:1.6; font-family:var(--mono);
+  }
+  .note strong{ color:var(--text-dim); }
+
+  .trust{
+    margin-top:20px; padding:26px 28px; border-radius:16px;
+    background: linear-gradient(180deg, #16161d, var(--panel));
+    border:1px solid var(--panel-border);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.03) inset;
+  }
+  .trust-title{
+    font-family:var(--mono); font-size:0.72rem; letter-spacing:0.12em; text-transform:uppercase;
+    color:var(--mint); margin-bottom:10px; display:flex; align-items:center; gap:8px;
+  }
+  .trust-title::before{ content:'✓'; }
+  .trust p{ color:var(--text-dim); font-size:0.88rem; line-height:1.7; margin:0; }
+
+  .footer{
+    text-align:center; margin-top:44px; padding-top:28px;
+    border-top:1px solid var(--panel-border);
+    display:flex; flex-direction:column; align-items:center; gap:10px;
+  }
+  .footer-mark{ display:flex; align-items:center; gap:7px; opacity:0.6; }
+  .footer-mark svg{ width:14px; height:14px; }
+  .footer-mark span{ font-family:var(--mono); font-size:0.78rem; letter-spacing:0.1em; color:var(--text-dim); }
+  .footer-status{
+    font-family:var(--mono); font-size:0.72rem; color:var(--text-faint);
+    display:flex; align-items:center; gap:7px;
+  }
+  .footer-status .dot{
+    width:6px;height:6px;border-radius:50%; background:var(--mint); box-shadow:0 0 8px var(--mint);
+  }
+  .footer-legal{ font-family:var(--mono); font-size:0.7rem; color:var(--text-faint); letter-spacing:0.02em; }
+
+  @media (prefers-reduced-motion: reduce){ .buy-btn{ transition:none; } }
+</style>
+</head>
+<body>
+<div class="top-banner">
+  <span>⚡ <strong>Instant key delivery</strong></span>
+  <span class="sep">·</span>
+  <span>Support online 24/7</span>
+  <span class="sep">·</span>
+  <span>Trusted by resellers worldwide</span>
+</div>
+<div class="wrap">
+
+  <div class="brand">
+    <div class="brand-mark">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M12 2L4 6v6c0 5 3.5 9 8 10 4.5-1 8-5 8-10V6l-8-4z" stroke="#1a1206" stroke-width="2" stroke-linejoin="round"/></svg>
+    </div>
+    <div>
+      <div class="brand-name">VOXX</div>
+      <div class="brand-sub">license store</div>
+    </div>
+    <a class="join-tg" href="https://t.me/yorxvox" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.9 4.36 18.6 20.1c-.25 1.1-.9 1.37-1.83.86l-5.06-3.73-2.44 2.35c-.27.27-.5.5-1.02.5l.37-5.18L18.63 6.1c.4-.36-.09-.56-.62-.2L6.6 12.9l-5.02-1.57c-1.09-.34-1.1-1.09.23-1.61L20.5 3.02c.9-.34 1.7.21 1.4 1.34Z"/></svg>
+      Join Telegram
+    </a>
+  </div>
+
+  <a class="apk-banner" href="https://t.me/yorxvox" target="_blank" rel="noopener">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.9 4.36 18.6 20.1c-.25 1.1-.9 1.37-1.83.86l-5.06-3.73-2.44 2.35c-.27.27-.5.5-1.02.5l.37-5.18L18.63 6.1c.4-.36-.09-.56-.62-.2L6.6 12.9l-5.02-1.57c-1.09-.34-1.1-1.09.23-1.61L20.5 3.02c.9-.34 1.7.21 1.4 1.34Z"/></svg>
+    <span>Join Telegram — required to request the APK</span>
+    <span class="apk-arrow">→</span>
+  </a>
+
+  <div class="hero">
+    <div class="eyebrow">keys issued instantly</div>
+    <h1>Get your license key</h1>
+    <p>Pick a duration below. Prices are shown in your local currency where available, plus USD and EUR for everyone else.</p>
+  </div>
+
+  <div class="grid">
+
+    <!-- 1 Day -->
+    <div class="card">
+      <div class="tier-tag">Tier 01</div>
+      <div class="tier-name">1 Day</div>
+      <div class="tier-desc">Short-term access, single device.</div>
+
+      <div class="price-primary"><span class="cur">Rs</span>99</div>
+      <div class="price-primary-label">NPR · Nepal</div>
+
+      <div class="divider-label">Other currencies</div>
+      <ul class="price-list">
+        <li><span class="place"><span class="flag">🇮🇳</span>India</span><span class="val">₹62</span></li>
+        <li><span class="place"><span class="flag">🇧🇩</span>Bangladesh</span><span class="val">৳92</span></li>
+        <li><span class="place">Other countries</span><span class="val">$0.75 <span class="code">USD</span></span></li>
+        <li><span class="place"></span><span class="val">€0.70 <span class="code">EUR</span></span></li>
+      </ul>
+
+      <div class="buy-row">
+        <a class="buy-btn" href="https://wa.me/qr/MQVCVRPJJHLCA1" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38a9.9 9.9 0 0 0 4.74 1.21h.01c5.46 0 9.9-4.45 9.9-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0 0 12.04 2Z"/></svg>WhatsApp</a>
+        <a class="buy-btn" href="https://t.me/yor_forg3r" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.9 4.36 18.6 20.1c-.25 1.1-.9 1.37-1.83.86l-5.06-3.73-2.44 2.35c-.27.27-.5.5-1.02.5l.37-5.18L18.63 6.1c.4-.36-.09-.56-.62-.2L6.6 12.9l-5.02-1.57c-1.09-.34-1.1-1.09.23-1.61L20.5 3.02c.9-.34 1.7.21 1.4 1.34Z"/></svg>Telegram</a>
+      </div>
+    </div>
+
+    <!-- 7 Day -->
+    <div class="card featured">
+      <div class="tier-tag">Tier 02 · Most popular</div>
+      <div class="tier-name">7 Days</div>
+      <div class="tier-desc">A full week, single device.</div>
+
+      <div class="price-primary"><span class="cur">Rs</span>399</div>
+      <div class="price-primary-label">NPR · Nepal</div>
+
+      <div class="divider-label">Other currencies</div>
+      <ul class="price-list">
+        <li><span class="place"><span class="flag">🇮🇳</span>India</span><span class="val">₹249</span></li>
+        <li><span class="place"><span class="flag">🇧🇩</span>Bangladesh</span><span class="val">৳366</span></li>
+        <li><span class="place">Other countries</span><span class="val">$3.00 <span class="code">USD</span></span></li>
+        <li><span class="place"></span><span class="val">€2.80 <span class="code">EUR</span></span></li>
+      </ul>
+
+      <div class="buy-row">
+        <a class="buy-btn" href="https://wa.me/qr/MQVCVRPJJHLCA1" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38a9.9 9.9 0 0 0 4.74 1.21h.01c5.46 0 9.9-4.45 9.9-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0 0 12.04 2Z"/></svg>WhatsApp</a>
+        <a class="buy-btn" href="https://t.me/yor_forg3r" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.9 4.36 18.6 20.1c-.25 1.1-.9 1.37-1.83.86l-5.06-3.73-2.44 2.35c-.27.27-.5.5-1.02.5l.37-5.18L18.63 6.1c.4-.36-.09-.56-.62-.2L6.6 12.9l-5.02-1.57c-1.09-.34-1.1-1.09.23-1.61L20.5 3.02c.9-.34 1.7.21 1.4 1.34Z"/></svg>Telegram</a>
+      </div>
+    </div>
+
+    <!-- 30 Day -->
+    <div class="card">
+      <div class="tier-tag">Tier 03</div>
+      <div class="tier-name">30 Days</div>
+      <div class="tier-desc">Full month, single device.</div>
+
+      <div class="price-primary"><span class="cur">Rs</span>1199</div>
+      <div class="price-primary-label">NPR · Nepal</div>
+
+      <div class="divider-label">Other currencies</div>
+      <ul class="price-list">
+        <li><span class="place"><span class="flag">🇮🇳</span>India</span><span class="val">₹749</span></li>
+        <li><span class="place"><span class="flag">🇧🇩</span>Bangladesh</span><span class="val">৳1098</span></li>
+        <li><span class="place">Other countries</span><span class="val">$9.00 <span class="code">USD</span></span></li>
+        <li><span class="place"></span><span class="val">€8.40 <span class="code">EUR</span></span></li>
+      </ul>
+
+      <div class="buy-row">
+        <a class="buy-btn" href="https://wa.me/qr/MQVCVRPJJHLCA1" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38a9.9 9.9 0 0 0 4.74 1.21h.01c5.46 0 9.9-4.45 9.9-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0 0 12.04 2Z"/></svg>WhatsApp</a>
+        <a class="buy-btn" href="https://t.me/yor_forg3r" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.9 4.36 18.6 20.1c-.25 1.1-.9 1.37-1.83.86l-5.06-3.73-2.44 2.35c-.27.27-.5.5-1.02.5l.37-5.18L18.63 6.1c.4-.36-.09-.56-.62-.2L6.6 12.9l-5.02-1.57c-1.09-.34-1.1-1.09.23-1.61L20.5 3.02c.9-.34 1.7.21 1.4 1.34Z"/></svg>Telegram</a>
+      </div>
+    </div>
+
+    <!-- Reseller -->
+    <div class="card reseller">
+      <div class="tier-tag">Tier 04 · Bulk</div>
+      <div class="tier-name">Reseller</div>
+      <div class="tier-desc">Bulk keys and custom limits for resellers.</div>
+
+      <div class="price-primary">Contact for pricing</div>
+      <div class="price-primary-label">Custom quote, negotiated per volume</div>
+
+      <div class="divider-label">What you get</div>
+      <ul class="price-list">
+        <li><span class="place">Bulk key batches</span></li>
+        <li><span class="place">Custom validity &amp; device limits</span></li>
+        <li><span class="place">Priority support</span></li>
+        <li><span class="place">Volume discounts</span></li>
+      </ul>
+
+      <div class="buy-row">
+        <a class="buy-btn" href="https://wa.me/qr/MQVCVRPJJHLCA1" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38a9.9 9.9 0 0 0 4.74 1.21h.01c5.46 0 9.9-4.45 9.9-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0 0 12.04 2Z"/></svg>WhatsApp</a>
+        <a class="buy-btn" href="https://t.me/yor_forg3r" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.9 4.36 18.6 20.1c-.25 1.1-.9 1.37-1.83.86l-5.06-3.73-2.44 2.35c-.27.27-.5.5-1.02.5l.37-5.18L18.63 6.1c.4-.36-.09-.56-.62-.2L6.6 12.9l-5.02-1.57c-1.09-.34-1.1-1.09.23-1.61L20.5 3.02c.9-.34 1.7.21 1.4 1.34Z"/></svg>Telegram</a>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="note">
+    <strong>Note:</strong> INR / BDT / USD / EUR amounts are approximate conversions from the NPR price — update if your live exchange rate changes.
+  </div>
+
+  <div class="trust">
+    <div class="trust-title">Safe &amp; trusted</div>
+    <p>Every key is generated and validated through our own license server — nothing is shared, resold, or reused across buyers. Keys activate instantly after payment is confirmed, are bound to a single device by default, and can be reissued through support if you switch devices. Support is available directly over WhatsApp and Telegram for activation help, refund questions, or key issues.</p>
+  </div>
+
+  <div class="footer">
+    <div class="footer-mark">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M12 2L4 6v6c0 5 3.5 9 8 10 4.5-1 8-5 8-10V6l-8-4z" stroke="#5a5960" stroke-width="1.6" stroke-linejoin="round"/></svg>
+      <span>VOXX</span>
+    </div>
+    <div class="footer-status"><span class="dot"></span>keys issued instantly · support online</div>
+    <div class="footer-legal">© 2026 VOXX · United Kingdom · All rights reserved</div>
+  </div>
+
+</div>
+</body>
+</html>
