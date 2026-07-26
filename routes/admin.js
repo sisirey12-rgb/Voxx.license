@@ -1,7 +1,7 @@
 const express = require('express');
 const { db } = require('../db');
 const adminAuth = require('../middleware/adminAuth');
-const { generateKeyString, addDaysISO, nowISO, computeStatus } = require('../helpers');
+const { generateKeyString, generateResellerToken, addDaysISO, nowISO, computeStatus } = require('../helpers');
 
 const router = express.Router();
 router.use(adminAuth);
@@ -150,6 +150,121 @@ router.post('/delete-revoked', async (req, res) => {
   const result = await db.execute(`DELETE FROM licenses WHERE status = 'revoked'`);
 
   res.json({ success: true, deleted: result.rowsAffected });
+});
+
+// ---- Reseller management ----
+
+// List all resellers, most recently created first.
+router.get('/resellers', async (req, res) => {
+  const result = await db.execute('SELECT id, name, credits, status, created_at FROM resellers ORDER BY created_at DESC');
+  res.json({ resellers: result.rows });
+});
+
+// Create a new reseller and hand back their token once — store it safely,
+// it's the only time the full token is returned.
+router.post('/resellers', async (req, res) => {
+  const { name, initial_credits = 0 } = req.body || {};
+  if (!name || !name.trim()) return res.status(400).json({ error: 'name required' });
+  if (!Number.isFinite(Number(initial_credits)) || Number(initial_credits) < 0) {
+    return res.status(400).json({ error: 'initial_credits must be zero or a positive number' });
+  }
+
+  const token = generateResellerToken();
+  const created_at = nowISO();
+
+  const result = await db.execute({
+    sql: `INSERT INTO resellers (name, token, credits, created_at, status) VALUES (?, ?, ?, ?, 'active')`,
+    args: [name.trim(), token, initial_credits, created_at],
+  });
+
+  res.json({ id: Number(result.lastInsertRowid), name: name.trim(), token, credits: initial_credits, status: 'active' });
+});
+
+// Directly adjust a reseller's balance (grant or correct, bypassing the top-up flow).
+router.post('/resellers/:id/adjust-credits', async (req, res) => {
+  const { id } = req.params;
+  const { delta } = req.body || {};
+  if (!Number.isFinite(Number(delta)) || Number(delta) === 0) {
+    return res.status(400).json({ error: 'delta must be a non-zero number' });
+  }
+
+  const result = await db.execute({ sql: 'UPDATE resellers SET credits = credits + ? WHERE id = ?', args: [delta, id] });
+  if (result.rowsAffected === 0) return res.status(404).json({ error: 'reseller not found' });
+
+  const updated = await db.execute({ sql: 'SELECT credits FROM resellers WHERE id = ?', args: [id] });
+  res.json({ success: true, credits: updated.rows[0]?.credits });
+});
+
+// Suspend/reactivate a reseller (suspended tokens are rejected by resellerAuth).
+router.post('/resellers/:id/set-status', async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body || {};
+  if (!['active', 'suspended'].includes(status)) {
+    return res.status(400).json({ error: "status must be 'active' or 'suspended'" });
+  }
+
+  const result = await db.execute({ sql: 'UPDATE resellers SET status = ? WHERE id = ?', args: [status, id] });
+  if (result.rowsAffected === 0) return res.status(404).json({ error: 'reseller not found' });
+
+  res.json({ success: true });
+});
+
+// A reseller's key-generation history (admin view — any reseller_id).
+router.get('/resellers/:id/sales', async (req, res) => {
+  const { id } = req.params;
+  const result = await db.execute({
+    sql: 'SELECT * FROM licenses WHERE reseller_id = ? ORDER BY created_at DESC',
+    args: [id],
+  });
+  const withStatus = result.rows.map(r => ({ ...r, computed_status: computeStatus(r) }));
+  res.json({ licenses: withStatus });
+});
+
+// ---- Credit top-up requests ----
+
+// List top-up requests, optionally filtered by status (?status=pending).
+router.get('/topups', async (req, res) => {
+  const { status } = req.query;
+  const sql = status
+    ? 'SELECT t.*, r.name AS reseller_name FROM credit_topups t JOIN resellers r ON r.id = t.reseller_id WHERE t.status = ? ORDER BY t.requested_at DESC'
+    : 'SELECT t.*, r.name AS reseller_name FROM credit_topups t JOIN resellers r ON r.id = t.reseller_id ORDER BY t.requested_at DESC';
+  const result = await db.execute(status ? { sql, args: [status] } : sql);
+  res.json({ topups: result.rows });
+});
+
+// Approve a pending top-up — credits the reseller and marks it resolved.
+router.post('/topups/:id/approve', async (req, res) => {
+  const { id } = req.params;
+
+  const topupResult = await db.execute({ sql: 'SELECT * FROM credit_topups WHERE id = ?', args: [id] });
+  const topup = topupResult.rows[0];
+  if (!topup) return res.status(404).json({ error: 'topup not found' });
+  if (topup.status !== 'pending') return res.status(409).json({ error: `topup already ${topup.status}` });
+
+  await db.execute({ sql: 'UPDATE resellers SET credits = credits + ? WHERE id = ?', args: [topup.amount, topup.reseller_id] });
+  await db.execute({
+    sql: `UPDATE credit_topups SET status = 'approved', resolved_at = ? WHERE id = ?`,
+    args: [nowISO(), id],
+  });
+
+  res.json({ success: true });
+});
+
+// Reject a pending top-up — no credits change.
+router.post('/topups/:id/reject', async (req, res) => {
+  const { id } = req.params;
+
+  const topupResult = await db.execute({ sql: 'SELECT * FROM credit_topups WHERE id = ?', args: [id] });
+  const topup = topupResult.rows[0];
+  if (!topup) return res.status(404).json({ error: 'topup not found' });
+  if (topup.status !== 'pending') return res.status(409).json({ error: `topup already ${topup.status}` });
+
+  await db.execute({
+    sql: `UPDATE credit_topups SET status = 'rejected', resolved_at = ? WHERE id = ?`,
+    args: [nowISO(), id],
+  });
+
+  res.json({ success: true });
 });
 
 module.exports = router;
