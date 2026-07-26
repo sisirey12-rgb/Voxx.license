@@ -15,7 +15,8 @@ router.get('/keys', async (req, res) => {
 
 // Generate a new key
 router.post('/generate-key', async (req, res) => {
-  const { validity_days = 30, max_devices = 1, label = null, license_key: customKey } = req.body || {};
+  const { validity_days = 30, max_devices = 1, label = null, custom_key, license_key: legacyKey } = req.body || {};
+  const customKey = (custom_key || legacyKey || '').trim() || null;
 
   if (!Number.isFinite(Number(validity_days)) || Number(validity_days) <= 0) {
     return res.status(400).json({ error: 'validity_days must be a positive number' });
