@@ -7,6 +7,12 @@ function generateKeyString() {
   return `VOXX-${suffix}`;
 }
 
+// Long random secret for a reseller's X-Reseller-Token — not shown in the
+// generated-key format, so it can't be confused with a license key.
+function generateResellerToken() {
+  return `rsl_${crypto.randomBytes(24).toString('hex')}`;
+}
+
 function addDaysISO(fromISO, days) {
   const d = new Date(fromISO);
   d.setDate(d.getDate() + Number(days));
@@ -29,4 +35,4 @@ function computeStatus(lic) {
   return 'active';
 }
 
-module.exports = { generateKeyString, addDaysISO, nowISO, daysLeft, computeStatus };
+module.exports = { generateKeyString, generateResellerToken, addDaysISO, nowISO, daysLeft, computeStatus };

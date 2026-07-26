@@ -5,6 +5,7 @@ const cors = require('cors');
 const { init } = require('./db');
 const adminRoutes = require('./routes/admin');
 const licenseRoutes = require('./routes/license');
+const resellerRoutes = require('./routes/reseller');
 
 const app = express();
 app.use(cors()); // tighten with { origin: 'https://your-netlify-site.netlify.app' } once deployed
@@ -16,6 +17,7 @@ app.get('/', (req, res) => {
 
 app.use('/admin', adminRoutes);
 app.use('/api', licenseRoutes);
+app.use('/reseller', resellerRoutes);
 
 const PORT = process.env.PORT || 3000;
 
