@@ -6,9 +6,16 @@ const { generateKeyString, generateResellerToken, addDaysISO, nowISO, computeSta
 const router = express.Router();
 router.use(adminAuth);
 
-// List all keys (console dashboard)
+// List all keys (console dashboard) — left-joined with resellers so keys
+// generated through a partner's panel are labeled with that partner's name.
+// reseller_name is null for keys you generated yourself via this console.
 router.get('/keys', async (req, res) => {
-  const result = await db.execute('SELECT * FROM licenses ORDER BY created_at DESC');
+  const result = await db.execute(`
+    SELECT l.*, r.name AS reseller_name, r.status AS reseller_status
+    FROM licenses l
+    LEFT JOIN resellers r ON r.id = l.reseller_id
+    ORDER BY l.created_at DESC
+  `);
   const withStatus = result.rows.map(r => ({ ...r, computed_status: computeStatus(r) }));
   res.json({ licenses: withStatus });
 });
