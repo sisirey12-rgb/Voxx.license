@@ -541,6 +541,8 @@
 <script>
 let licenses = [];
 let pendingExtendKey = null;
+let pendingModalMode = 'extend';
+let pendingResellerId = null;
 
 // Drives a .custom-select block the same way a native <select> would:
 // exposes .value, fires onChange on pick, and closes on outside click.
@@ -772,14 +774,42 @@ async function resetHwid(key){
 }
 
 function openExtend(key){
+  pendingModalMode = 'extend';
   pendingExtendKey = key;
   document.getElementById('modalTitle').textContent = 'Extend validity';
   document.getElementById('modalKeyLabel').textContent = key;
-  document.getElementById('modalInput').value = 30;
+  const input = document.getElementById('modalInput');
+  input.value = 30;
+  input.min = 1;
   document.getElementById('overlay').classList.add('open');
 }
+
+function openAdjustCredits(id, resellerName){
+  pendingModalMode = 'credits';
+  pendingResellerId = id;
+  document.getElementById('modalTitle').textContent = 'Adjust credits';
+  document.getElementById('modalKeyLabel').textContent = resellerName ? `${resellerName} · use a negative number to deduct` : 'Use a negative number to deduct';
+  const input = document.getElementById('modalInput');
+  input.value = 0;
+  input.removeAttribute('min');
+  document.getElementById('overlay').classList.add('open');
+}
+
 document.getElementById('modalCancel').onclick = () => document.getElementById('overlay').classList.remove('open');
 document.getElementById('modalConfirm').onclick = async () => {
+  if(pendingModalMode === 'credits'){
+    const delta = Number(document.getElementById('modalInput').value);
+    document.getElementById('overlay').classList.remove('open');
+    if(!delta) return;
+    try{
+      await apiCall(`/admin/resellers/${pendingResellerId}/adjust-credits`, 'POST', { delta });
+      await loadResellers();
+      showToast('Credits updated');
+    }catch(e){
+      showToast(e.message, true);
+    }
+    return;
+  }
   const days = Number(document.getElementById('modalInput').value) || 0;
   if(days > 0){
     try{
@@ -981,7 +1011,7 @@ async function loadResellers(){
         <div class="meta-row"><span class="k">Sale rate</span><span class="v">${r.sales_per_day}/day</span></div>
         <div class="meta-row"><span class="k">Created</span><span class="v">${fmtDate(r.created_at)}</span></div>
         <div class="card-actions">
-          <button class="btn btn-ghost btn-sm" onclick="adjustCredits(${r.id})">Adjust credits</button>
+          <button class="btn btn-ghost btn-sm" onclick="openAdjustCredits(${r.id}, '${r.name}')">Adjust credits</button>
           <button class="btn btn-ghost btn-sm" onclick="toggleResellerStatus(${r.id}, '${r.status}')" style="color:${r.status==='active' ? 'var(--red)' : 'var(--green)'}">${r.status === 'active' ? 'Suspend' : 'Reactivate'}</button>
           <button class="btn btn-ghost btn-sm" onclick="toggleResellerSales(${r.id})">View sales</button>
         </div>
@@ -1012,18 +1042,6 @@ async function toggleResellerSales(id){
     box.innerHTML = `<div style="background: var(--panel-sunk); border-radius:10px; padding:10px 12px;">${rows}${more}</div>`;
   }catch(e){
     box.innerHTML = `<div style="font-size:12.5px; color: var(--red);">${e.message}</div>`;
-  }
-}
-
-async function adjustCredits(id){
-  const delta = Number(prompt('Add credits (use a negative number to deduct):', '0'));
-  if(!delta) return;
-  try{
-    await apiCall(`/admin/resellers/${id}/adjust-credits`, 'POST', { delta });
-    await loadResellers();
-    showToast('Credits updated');
-  }catch(e){
-    showToast(e.message, true);
   }
 }
 
