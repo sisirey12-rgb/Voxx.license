@@ -154,10 +154,34 @@ router.post('/delete-revoked', async (req, res) => {
 
 // ---- Reseller management ----
 
-// List all resellers, most recently created first.
+// List all resellers, most recently created first — includes each
+// reseller's total keys sold, currently-active keys, and days since they
+// were created (the console uses these for the sales-count/rate display).
 router.get('/resellers', async (req, res) => {
-  const result = await db.execute('SELECT id, name, credits, status, created_at FROM resellers ORDER BY created_at DESC');
-  res.json({ resellers: result.rows });
+  const resellersResult = await db.execute('SELECT id, name, credits, status, created_at FROM resellers ORDER BY created_at DESC');
+  const licensesResult = await db.execute('SELECT reseller_id, status, expires_at FROM licenses WHERE reseller_id IS NOT NULL');
+
+  const counts = {};
+  for (const l of licensesResult.rows) {
+    const rid = l.reseller_id;
+    if (!counts[rid]) counts[rid] = { total: 0, active: 0 };
+    counts[rid].total += 1;
+    const st = computeStatus(l);
+    if (st === 'active' || st === 'expiring') counts[rid].active += 1;
+  }
+
+  const resellers = resellersResult.rows.map(r => {
+    const c = counts[r.id] || { total: 0, active: 0 };
+    const daysActive = Math.max(1, Math.ceil((Date.now() - new Date(r.created_at)) / 86400000));
+    return {
+      ...r,
+      total_sales: c.total,
+      active_sales: c.active,
+      sales_per_day: Number((c.total / daysActive).toFixed(2)),
+    };
+  });
+
+  res.json({ resellers });
 });
 
 // Create a new reseller and hand back their token once — store it safely,
