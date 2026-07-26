@@ -1,7 +1,9 @@
 const crypto = require('crypto');
 
 function generateKeyString() {
-  const suffix = crypto.randomBytes(5).toString('hex').toUpperCase();
+  const len = 8 + Math.floor(Math.random() * 3); // 8, 9, or 10 hex chars
+  const bytesNeeded = Math.ceil(len / 2);
+  const suffix = crypto.randomBytes(bytesNeeded).toString('hex').toUpperCase().slice(0, len);
   return `VOXX-${suffix}`;
 }
 
