@@ -6,7 +6,7 @@
 // your Turso client if it's not already a raw @libsql/client instance.
 
 const bcrypt = require('bcrypt');
-const db = require('./db'); // adjust path/import to match your project
+const { db } = require('./db');
 
 async function main() {
   const [, , username, password] = process.argv;
