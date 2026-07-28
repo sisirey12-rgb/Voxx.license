@@ -2,7 +2,7 @@
 // Sliding 15-minute expiry: every valid request pushes expires_at forward.
 
 const crypto = require('crypto');
-const db = require('../db');
+const { db } = require('../db');
 
 const SESSION_COOKIE = 'voxx_session';
 const SESSION_MINUTES = 15;

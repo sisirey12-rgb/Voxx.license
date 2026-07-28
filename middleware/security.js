@@ -1,7 +1,7 @@
 // Lockout tracking (by username AND by IP, independently) + audit logging.
 // Adjust `db.execute({ sql, args })` calls if your db.js wraps @libsql/client differently.
 
-const db = require('../db');
+const { db } = require('../db');
 
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_MINUTES = 60;
