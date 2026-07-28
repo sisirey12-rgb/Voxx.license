@@ -1,10 +1,13 @@
 const express = require('express');
 const { db } = require('../db');
-const adminAuth = require('../middleware/adminAuth');
+const { requireSession } = require('../middleware/authSession');
 const { generateKeyString, generateResellerToken, addDaysISO, nowISO, computeStatus } = require('../helpers');
 
 const router = express.Router();
-router.use(adminAuth);
+// Every key/reseller/topup route below now requires a live session token
+// (from /admin/login), not the static ADMIN_KEY. A leaked token expires in
+// 15 minutes and can be individually revoked; the old key never expired.
+router.use(requireSession);
 
 // List all keys (console dashboard) — left-joined with resellers so keys
 // generated through a partner's panel are labeled with that partner's name.
