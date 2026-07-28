@@ -1,10 +1,12 @@
-// Validates the session cookie on every protected /admin/* request.
+// Validates the session token on every protected /admin/* request.
 // Sliding 15-minute expiry: every valid request pushes expires_at forward.
+//
+// Sent as: Authorization: Bearer <token>  (not a cookie — avoids third-party
+// cookie blocking, since the frontend and backend live on different domains).
 
 const crypto = require('crypto');
 const { db } = require('../db');
 
-const SESSION_COOKIE = 'voxx_session';
 const SESSION_MINUTES = 15;
 
 function newSessionId() {
@@ -29,9 +31,16 @@ async function destroySession(sessionId) {
   await db.execute({ sql: `DELETE FROM sessions WHERE id = ?`, args: [sessionId] });
 }
 
-// Express middleware: requires a valid, unexpired session cookie.
+function getBearerToken(req) {
+  const header = req.headers['authorization'] || '';
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : null;
+}
+
+// Express middleware: requires a valid, unexpired session token
+// in the Authorization: Bearer <token> header.
 async function requireSession(req, res, next) {
-  const sessionId = req.cookies ? req.cookies[SESSION_COOKIE] : null;
+  const sessionId = getBearerToken(req);
   if (!sessionId) return res.status(401).json({ error: 'not_authenticated' });
 
   const now = new Date().toISOString();
@@ -42,7 +51,6 @@ async function requireSession(req, res, next) {
   const hits = rows.rows || rows;
 
   if (hits.length === 0) {
-    res.clearCookie(SESSION_COOKIE);
     return res.status(401).json({ error: 'session_expired' });
   }
 
@@ -57,25 +65,8 @@ async function requireSession(req, res, next) {
   next();
 }
 
-function setSessionCookie(res, sessionId) {
-  res.cookie(SESSION_COOKIE, sessionId, {
-    httpOnly: true,
-    secure: true,       // requires HTTPS — true on Render/Railway/Fly by default
-    sameSite: 'none',   // must be 'none' for cross-site cookies (frontend and backend are on different domains)
-    maxAge: SESSION_MINUTES * 60 * 1000,
-    path: '/',
-  });
-}
-
-function clearSessionCookie(res) {
-  res.clearCookie(SESSION_COOKIE, { path: '/' });
-}
-
 module.exports = {
-  SESSION_COOKIE,
   createSession,
   destroySession,
   requireSession,
-  setSessionCookie,
-  clearSessionCookie,
 };
