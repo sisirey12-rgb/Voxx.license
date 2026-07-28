@@ -344,9 +344,58 @@
     .header-actions{ width:100%; }
     .header-actions .btn{ flex:1; justify-content:center; }
   }
+
+  /* --- login overlay --- */
+  #loginOverlay{
+    position:fixed; inset:0; z-index:1000;
+    display:none; align-items:center; justify-content:center;
+    background: radial-gradient(ellipse 900px 500px at 15% -10%, rgba(157,111,255,0.18), transparent 60%), var(--bg);
+  }
+  #loginOverlay.open{ display:flex; }
+  .login-card{
+    width: 100%; max-width: 360px; background: var(--panel);
+    border-radius: 16px; padding: 28px 26px; border:1px solid var(--line);
+  }
+  .login-card h2{ font-family:'Space Grotesk',sans-serif; margin:0 0 4px; font-size:19px; }
+  .login-card p.sub{ margin:0 0 20px; color: var(--text-faint); font-size:12.5px; }
+  .login-card .field{ margin-bottom:14px; }
+  .login-card label{ display:block; font-size:12px; color: var(--text-dim); margin-bottom:6px; font-weight:600; }
+  .login-card input{
+    width:100%; background: var(--panel-sunk); border:1px solid var(--line); color: var(--text);
+    border-radius:9px; padding:10px 12px; font-size:13.5px; font-family:'Inter',sans-serif;
+  }
+  .login-card input:focus{ outline:none; border-color: rgba(157,111,255,0.6); }
+  .login-card .err{ color: var(--red); font-size:12.5px; min-height:16px; margin-top:2px; }
+  .login-card .btn{ width:100%; justify-content:center; margin-top:6px; }
 </style>
 </head>
 <body>
+
+<div id="loginOverlay">
+  <div class="login-card neon">
+    <h2>VOXX Control</h2>
+    <p class="sub">Sign in to continue</p>
+    <div class="field">
+      <label>API base URL</label>
+      <input type="text" id="loginApiBase" placeholder="https://your-server.onrender.com">
+    </div>
+    <div class="field">
+      <label>Username</label>
+      <input type="text" id="loginUsername" autocomplete="username">
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input type="password" id="loginPassword" autocomplete="current-password">
+    </div>
+    <div class="field" id="loginTotpField" style="display:none;">
+      <label>2FA code</label>
+      <input type="text" id="loginTotp" inputmode="numeric" placeholder="6-digit code">
+    </div>
+    <div class="err" id="loginError"></div>
+    <button class="btn btn-primary" id="btnLogin">Log in</button>
+  </div>
+</div>
+
 <div class="wrap">
 
   <header class="neon">
@@ -385,6 +434,9 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
         Generate key
       </button>
+      <button class="btn btn-ghost" id="btnLogout" title="Log out">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      </button>
     </div>
   </header>
 
@@ -410,15 +462,12 @@
   <div class="gen-panel neon" id="settingsPanel">
     <h3>Server connection</h3>
     <div class="gen-grid">
-      <div class="field" style="grid-column: span 2;">
+      <div class="field" style="grid-column: span 4;">
         <label>API base URL</label>
         <input type="text" id="apiBaseUrl" placeholder="https://your-server.onrender.com">
       </div>
-      <div class="field" style="grid-column: span 2;">
-        <label>Admin key</label>
-        <input type="password" id="adminKey" placeholder="Matches ADMIN_KEY on your server">
-      </div>
     </div>
+    <p style="margin:10px 0 0; color: var(--text-faint); font-size:12px;">Sign-in is now handled via the login screen (session cookie) — there's no admin key stored in the browser anymore.</p>
     <div style="margin-top:14px; display:flex; gap:10px; align-items:center;">
       <button class="btn btn-primary btn-sm" id="btnSaveSettings">Save & connect</button>
       <span id="connStatus" style="font-size:12.5px; color: var(--text-dim); font-weight:500;"></span>
@@ -578,23 +627,101 @@ function initCustomSelect(rootId, onChange){
 }
 
 function getApiBase(){ return localStorage.getItem('voxx_api_base') || ''; }
-function getAdminKey(){ return localStorage.getItem('voxx_admin_key') || ''; }
 
 async function apiCall(path, method='GET', body=null){
   const base = getApiBase();
   if(!base) throw new Error('no_server_configured');
   const res = await fetch(base.replace(/\/$/,'') + path, {
     method,
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Admin-Key': getAdminKey()
-    },
+    credentials: 'include', // send the session cookie set by /admin/login
+    headers: { 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined
   });
+  if(res.status === 401){
+    showLogin('Session expired — please log in again.');
+    throw new Error('not_authenticated');
+  }
   const data = await res.json().catch(() => ({}));
   if(!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
 }
+
+/* ---------- auth: login screen / session check / logout ---------- */
+
+function showLogin(message){
+  document.getElementById('loginApiBase').value = getApiBase();
+  document.getElementById('loginError').textContent = message || '';
+  document.getElementById('loginOverlay').classList.add('open');
+}
+function hideLogin(){
+  document.getElementById('loginOverlay').classList.remove('open');
+  document.getElementById('loginPassword').value = '';
+  document.getElementById('loginTotp').value = '';
+  document.getElementById('loginError').textContent = '';
+}
+
+async function checkSession(){
+  if(!getApiBase()){ showLogin(); return; }
+  try{
+    const res = await fetch(getApiBase().replace(/\/$/,'') + '/admin/session', { credentials: 'include' });
+    if(!res.ok){ showLogin(); return; }
+    hideLogin();
+    loadLicenses();
+    updateTopupBadge();
+  }catch(e){
+    showLogin('Could not reach server.');
+  }
+}
+
+document.getElementById('btnLogin').onclick = async () => {
+  const base = document.getElementById('loginApiBase').value.trim().replace(/\/$/,'');
+  const username = document.getElementById('loginUsername').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  const totp_code = document.getElementById('loginTotp').value.trim();
+  const errEl = document.getElementById('loginError');
+  if(!base || !username || !password){ errEl.textContent = 'Fill in all fields.'; return; }
+  localStorage.setItem('voxx_api_base', base);
+  document.getElementById('apiBaseUrl').value = base;
+  const btn = document.getElementById('btnLogin');
+  btn.disabled = true; btn.textContent = 'Signing in…';
+  try{
+    const res = await fetch(base + '/admin/login', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, totp_code: totp_code || undefined })
+    });
+    const data = await res.json().catch(() => ({}));
+    if(!res.ok){
+      if(data.error === 'totp_required'){
+        document.getElementById('loginTotpField').style.display = 'block';
+        errEl.textContent = 'Enter your 2FA code.';
+      } else {
+        errEl.textContent = data.error || 'Login failed.';
+      }
+      return;
+    }
+    hideLogin();
+    document.getElementById('loginTotpField').style.display = 'none';
+    loadLicenses();
+    updateTopupBadge();
+    showToast('Signed in');
+  }catch(e){
+    errEl.textContent = 'Could not reach server.';
+  }finally{
+    btn.disabled = false; btn.textContent = 'Log in';
+  }
+};
+['loginUsername','loginPassword','loginTotp'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', e => {
+    if(e.key === 'Enter') document.getElementById('btnLogin').click();
+  });
+});
+
+document.getElementById('btnLogout').onclick = async () => {
+  try{ await apiCall('/admin/logout', 'POST'); }catch(e){ /* ignore */ }
+  showLogin();
+};
 
 function daysLeft(expiresAt){
   return Math.ceil((new Date(expiresAt) - new Date()) / 86400000);
@@ -1082,21 +1209,16 @@ document.getElementById('btnCopyNewToken').onclick = () => {
 };
 document.getElementById('btnSaveSettings').onclick = async () => {
   const url = document.getElementById('apiBaseUrl').value.trim();
-  const key = document.getElementById('adminKey').value.trim();
   localStorage.setItem('voxx_api_base', url);
-  localStorage.setItem('voxx_admin_key', key);
-  await loadLicenses();
-  await updateTopupBadge();
+  await checkSession();
 };
 document.getElementById('searchBox').oninput = renderCards;
 const filterStatusCtrl = initCustomSelect('filterStatusSelect', renderCards);
 const topupFilterCtrl = initCustomSelect('topupFilterSelect', loadTopups);
 
 document.getElementById('apiBaseUrl').value = getApiBase();
-document.getElementById('adminKey').value = getAdminKey();
 
-loadLicenses();
-updateTopupBadge();
+checkSession();
 </script>
 </body>
 </html>
