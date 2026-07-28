@@ -15,8 +15,8 @@ const app = express();
 app.set('trust proxy', 1); // needed on Render/Railway/Fly so req.ip is the real client IP
 
 app.use(cors({
-  origin: 'https://your-frontend.netlify.app', // <-- set this to your actual Netlify URL
-  credentials: true, // required so the browser sends/receives the session cookie
+  origin: 'https://admicontrolvoxx.netlify.app',
+  credentials: true,
 }));
 app.use(express.json());
 app.use(cookieParser());
