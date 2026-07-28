@@ -9,13 +9,19 @@ const { checkLockout, recordAttempt, logAction, getClientIp } = require('../midd
 const router = express.Router();
 
 // POST /admin/setup-admin  { admin_key, username, password }
-// Bootstraps the first admin account, or resets an existing one's password.
+// This is now the ONE path for creating an account OR replacing its
+// credentials — used both before you're logged in (bootstrap) and from
+// inside the console (credential reset). There is no "enter your current
+// password to change it" flow anymore: current_password isn't a strong
+// gate (anyone with a live/stolen session already has it implicitly, since
+// they're already past login) and it's one more thing that can be phished.
+// ADMIN_KEY is the one root secret that actually proves you're the owner —
+// so it's the one thing that can rewrite credentials.
+//
 // Replaces the old GET .../setup-admin?key=...&username=...&password=...
-// route: that version put the password in the URL itself, which ends up in
-// browser history, server access logs, and Render's request logs. This is a
-// POST with the values in the body, same as every other route here.
-// Gated only by ADMIN_KEY (server env var) since, on first run, no admin
-// account exists yet to authenticate a session against.
+// route: that put the password in the URL, which ends up in browser
+// history, server access logs, and Render's request logs. This is a POST
+// with everything in the body, same as every other route here.
 router.post('/setup-admin', async (req, res) => {
   const { admin_key, username, password } = req.body || {};
   const ip = getClientIp(req);
@@ -39,41 +45,33 @@ router.post('/setup-admin', async (req, res) => {
     args: [username, hash],
   });
 
-  await logAction({ username, action: 'admin_account_created_or_reset', ip, userAgent });
-  res.json({ ok: true, message: `Admin account "${username}" is ready. You can log in now.` });
+  // Whatever the old credentials were, they're gone now — kill every
+  // outstanding session for this account so a stolen/old token (or a
+  // browser you forgot was still logged in) stops working immediately,
+  // not just whenever it happens to expire.
+  const rows = await db.execute({ sql: `SELECT id FROM admin_users WHERE username = ?`, args: [username] });
+  const hits = rows.rows || rows;
+  let revoked = 0;
+  if (hits.length > 0) {
+    const result = await db.execute({ sql: `DELETE FROM sessions WHERE admin_id = ?`, args: [hits[0].id] });
+    revoked = result.rowsAffected || 0;
+  }
+
+  await logAction({ username, action: 'admin_credentials_reset', ip, userAgent, details: { sessions_revoked: revoked } });
+  res.json({ ok: true, message: `Admin account "${username}" is ready. Every previous session was signed out — log in again.`, sessions_revoked: revoked });
 });
 
-// POST /admin/change-password  { current_password, new_password }
-// Requires an active session — proves you're already logged in as the
-// account you're changing, and additionally re-checks current_password so
-// a hijacked-but-still-live session can't silently lock the real owner out.
-router.post('/change-password', requireSession, async (req, res) => {
-  const { current_password, new_password } = req.body || {};
-  const ip = getClientIp(req);
-  const userAgent = req.headers['user-agent'];
-
-  if (!current_password || !new_password) {
-    return res.status(400).json({ error: 'current_and_new_password_required' });
-  }
-  if (new_password.length < 12) {
-    return res.status(400).json({ error: 'password_too_short', message: 'Use at least 12 characters.' });
-  }
-
-  const rows = await db.execute({ sql: `SELECT username, password_hash FROM admin_users WHERE id = ?`, args: [req.adminId] });
-  const hits = rows.rows || rows;
-  if (hits.length === 0) return res.status(404).json({ error: 'no_such_user' });
-
-  const ok = await bcrypt.compare(current_password, hits[0].password_hash);
-  if (!ok) {
-    await logAction({ adminId: req.adminId, username: hits[0].username, action: 'change_password_fail', ip, userAgent });
-    return res.status(401).json({ error: 'current_password_incorrect' });
-  }
-
-  const newHash = await bcrypt.hash(new_password, 12);
-  await db.execute({ sql: `UPDATE admin_users SET password_hash = ? WHERE id = ?`, args: [newHash, req.adminId] });
-  await logAction({ adminId: req.adminId, username: hits[0].username, action: 'change_password_success', ip, userAgent });
-
-  res.json({ ok: true });
+// POST /admin/logout-all  — kills every OTHER session for the currently
+// signed-in account (keeps the one making this request alive). Use this
+// when you suspect a device you're not holding right now is still logged
+// in, without wanting to reset your password or sign yourself out too.
+router.post('/logout-all', requireSession, async (req, res) => {
+  const result = await db.execute({
+    sql: `DELETE FROM sessions WHERE admin_id = ? AND id != ?`,
+    args: [req.adminId, req.sessionId],
+  });
+  await logAction({ adminId: req.adminId, action: 'logout_all_other_sessions', ip: getClientIp(req), userAgent: req.headers['user-agent'], details: { sessions_revoked: result.rowsAffected } });
+  res.json({ ok: true, sessions_revoked: result.rowsAffected || 0 });
 });
 
 // POST /admin/login  { username, password, totp_code? }
