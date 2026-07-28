@@ -8,23 +8,85 @@ const { checkLockout, recordAttempt, logAction, getClientIp } = require('../midd
 
 const router = express.Router();
 
-// POST /admin/login  { username, password, totp_code? }
-// On success, returns the shared ADMIN_KEY. The frontend stores it and
-// sends it as X-Admin-Key on every subsequent request — same mechanism
-// your existing admin routes already use.
-router.post('/login', async (req, res) => {
-  const { username, password, admin_key, totp_code } = req.body || {};
+// POST /admin/setup-admin  { admin_key, username, password }
+// Bootstraps the first admin account, or resets an existing one's password.
+// Replaces the old GET .../setup-admin?key=...&username=...&password=...
+// route: that version put the password in the URL itself, which ends up in
+// browser history, server access logs, and Render's request logs. This is a
+// POST with the values in the body, same as every other route here.
+// Gated only by ADMIN_KEY (server env var) since, on first run, no admin
+// account exists yet to authenticate a session against.
+router.post('/setup-admin', async (req, res) => {
+  const { admin_key, username, password } = req.body || {};
   const ip = getClientIp(req);
   const userAgent = req.headers['user-agent'];
 
-  if (!username || !password || !admin_key) {
-    return res.status(400).json({ error: 'username_password_and_admin_key_required' });
+  if (!admin_key || admin_key !== process.env.ADMIN_KEY) {
+    return res.status(403).json({ error: 'invalid_admin_key' });
+  }
+  if (!username || !password) {
+    return res.status(400).json({ error: 'username_and_password_required' });
+  }
+  if (password.length < 12) {
+    return res.status(400).json({ error: 'password_too_short', message: 'Use at least 12 characters.' });
   }
 
-  // Second, independent secret — must match exactly, regardless of username/password.
-  if (admin_key !== process.env.ADMIN_KEY) {
-    await logAction({ username, action: 'login_fail', ip, userAgent, details: { reason: 'bad_admin_key' } });
-    return res.status(401).json({ error: 'invalid_admin_key' });
+  const hash = await bcrypt.hash(password, 12);
+  await db.execute({
+    sql: `INSERT INTO admin_users (username, password_hash)
+          VALUES (?, ?)
+          ON CONFLICT(username) DO UPDATE SET password_hash = excluded.password_hash`,
+    args: [username, hash],
+  });
+
+  await logAction({ username, action: 'admin_account_created_or_reset', ip, userAgent });
+  res.json({ ok: true, message: `Admin account "${username}" is ready. You can log in now.` });
+});
+
+// POST /admin/change-password  { current_password, new_password }
+// Requires an active session — proves you're already logged in as the
+// account you're changing, and additionally re-checks current_password so
+// a hijacked-but-still-live session can't silently lock the real owner out.
+router.post('/change-password', requireSession, async (req, res) => {
+  const { current_password, new_password } = req.body || {};
+  const ip = getClientIp(req);
+  const userAgent = req.headers['user-agent'];
+
+  if (!current_password || !new_password) {
+    return res.status(400).json({ error: 'current_and_new_password_required' });
+  }
+  if (new_password.length < 12) {
+    return res.status(400).json({ error: 'password_too_short', message: 'Use at least 12 characters.' });
+  }
+
+  const rows = await db.execute({ sql: `SELECT username, password_hash FROM admin_users WHERE id = ?`, args: [req.adminId] });
+  const hits = rows.rows || rows;
+  if (hits.length === 0) return res.status(404).json({ error: 'no_such_user' });
+
+  const ok = await bcrypt.compare(current_password, hits[0].password_hash);
+  if (!ok) {
+    await logAction({ adminId: req.adminId, username: hits[0].username, action: 'change_password_fail', ip, userAgent });
+    return res.status(401).json({ error: 'current_password_incorrect' });
+  }
+
+  const newHash = await bcrypt.hash(new_password, 12);
+  await db.execute({ sql: `UPDATE admin_users SET password_hash = ? WHERE id = ?`, args: [newHash, req.adminId] });
+  await logAction({ adminId: req.adminId, username: hits[0].username, action: 'change_password_success', ip, userAgent });
+
+  res.json({ ok: true });
+});
+
+// POST /admin/login  { username, password, totp_code? }
+// ADMIN_KEY is no longer part of login — it's only ever used, separately,
+// by POST /setup-admin below to bootstrap or reset an account. On success
+// this issues a real session token (see authSession.js), not a static key.
+router.post('/login', async (req, res) => {
+  const { username, password, totp_code } = req.body || {};
+  const ip = getClientIp(req);
+  const userAgent = req.headers['user-agent'];
+
+  if (!username || !password) {
+    return res.status(400).json({ error: 'username_and_password_required' });
   }
 
   const lock = await checkLockout(username, ip);
