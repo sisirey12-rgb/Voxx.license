@@ -1,11 +1,10 @@
 const express = require('express');
 const { db } = require('../db');
+const adminAuth = require('../middleware/adminAuth');
 const { generateKeyString, generateResellerToken, addDaysISO, nowISO, computeStatus } = require('../helpers');
 
 const router = express.Router();
-// Auth is now handled by requireSession (applied where this router is
-// mounted in server.js). The old X-Admin-Key check (adminAuth) was removed
-// since the frontend no longer sends that header.
+router.use(adminAuth);
 
 // List all keys (console dashboard) — left-joined with resellers so keys
 // generated through a partner's panel are labeled with that partner's name.

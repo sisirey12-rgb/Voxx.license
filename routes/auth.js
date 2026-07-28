@@ -3,12 +3,15 @@ const bcrypt = require('bcrypt');
 const speakeasy = require('speakeasy');
 const qrcode = require('qrcode');
 const { db } = require('../db');
-const { createSession, destroySession, requireSession } = require('../middleware/authSession');
+const adminAuth = require('../middleware/adminAuth');
 const { checkLockout, recordAttempt, logAction, getClientIp } = require('../middleware/security');
 
 const router = express.Router();
 
 // POST /admin/login  { username, password, totp_code? }
+// On success, returns the shared ADMIN_KEY. The frontend stores it and
+// sends it as X-Admin-Key on every subsequent request — same mechanism
+// your existing admin routes already use.
 router.post('/login', async (req, res) => {
   const { username, password, totp_code } = req.body || {};
   const ip = getClientIp(req);
@@ -49,7 +52,6 @@ router.post('/login', async (req, res) => {
 
   if (user.totp_enabled) {
     if (!totp_code) {
-      // Password was right, but 2FA is required — don't count this as a failure yet.
       return res.status(401).json({ error: 'totp_required' });
     }
     const totpOk = speakeasy.totp.verify({
@@ -66,45 +68,46 @@ router.post('/login', async (req, res) => {
   }
 
   await recordAttempt(username, ip, true);
-  const sessionId = await createSession(user.id, ip, userAgent);
   await logAction({ adminId: user.id, username, action: 'login_success', ip, userAgent });
 
-  // Token goes in the JSON body, not a cookie — the frontend stores it and
-  // sends it back as `Authorization: Bearer <token>` on every request.
-  res.json({ ok: true, session_token: sessionId });
+  res.json({ ok: true, admin_key: process.env.ADMIN_KEY });
 });
 
-// POST /admin/logout
-router.post('/logout', requireSession, async (req, res) => {
-  const ip = getClientIp(req);
-  await destroySession(req.sessionId);
-  await logAction({ adminId: req.adminId, action: 'logout', ip, userAgent: req.headers['user-agent'] });
+// POST /admin/logout — nothing to invalidate server-side (no session state);
+// the frontend just clears its stored key. Kept for symmetry / future audit use.
+router.post('/logout', adminAuth, async (req, res) => {
+  await logAction({ action: 'logout', ip: getClientIp(req), userAgent: req.headers['user-agent'] });
   res.json({ ok: true });
 });
 
-// GET /admin/session — frontend calls this on load to check if still logged in
-router.get('/session', requireSession, (req, res) => {
+// GET /admin/session — frontend calls this on load to check the stored key still works
+router.get('/session', adminAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-// POST /admin/2fa/setup — generates a secret + QR code, does NOT enable 2FA yet
-router.post('/2fa/setup', requireSession, async (req, res) => {
+// --- 2FA management. Since there's no per-session identity anymore,
+// these take `username` explicitly and are gated by the shared admin key. ---
+
+router.post('/2fa/setup', adminAuth, async (req, res) => {
+  const { username } = req.body || {};
+  if (!username) return res.status(400).json({ error: 'username_required' });
+  const rows = await db.execute({ sql: `SELECT id FROM admin_users WHERE username = ?`, args: [username] });
+  const hits = rows.rows || rows;
+  if (hits.length === 0) return res.status(404).json({ error: 'no_such_user' });
+
   const secret = speakeasy.generateSecret({ name: 'VOXX Admin' });
   await db.execute({
     sql: `UPDATE admin_users SET totp_secret = ? WHERE id = ?`,
-    args: [secret.base32, req.adminId],
+    args: [secret.base32, hits[0].id],
   });
   const qr = await qrcode.toDataURL(secret.otpauth_url);
   res.json({ qr_code: qr, secret: secret.base32 });
 });
 
-// POST /admin/2fa/verify  { totp_code } — confirms the code works, then enables 2FA
-router.post('/2fa/verify', requireSession, async (req, res) => {
-  const { totp_code } = req.body || {};
-  const rows = await db.execute({
-    sql: `SELECT totp_secret FROM admin_users WHERE id = ?`,
-    args: [req.adminId],
-  });
+router.post('/2fa/verify', adminAuth, async (req, res) => {
+  const { username, totp_code } = req.body || {};
+  if (!username) return res.status(400).json({ error: 'username_required' });
+  const rows = await db.execute({ sql: `SELECT id, totp_secret FROM admin_users WHERE username = ?`, args: [username] });
   const hits = rows.rows || rows;
   if (hits.length === 0 || !hits[0].totp_secret) {
     return res.status(400).json({ error: 'run_2fa_setup_first' });
@@ -117,18 +120,19 @@ router.post('/2fa/verify', requireSession, async (req, res) => {
   });
   if (!ok) return res.status(401).json({ error: 'invalid_totp' });
 
-  await db.execute({ sql: `UPDATE admin_users SET totp_enabled = 1 WHERE id = ?`, args: [req.adminId] });
-  await logAction({ adminId: req.adminId, action: '2fa_enabled', ip: getClientIp(req), userAgent: req.headers['user-agent'] });
+  await db.execute({ sql: `UPDATE admin_users SET totp_enabled = 1 WHERE id = ?`, args: [hits[0].id] });
+  await logAction({ username, action: '2fa_enabled', ip: getClientIp(req), userAgent: req.headers['user-agent'] });
   res.json({ ok: true });
 });
 
-// POST /admin/2fa/disable
-router.post('/2fa/disable', requireSession, async (req, res) => {
+router.post('/2fa/disable', adminAuth, async (req, res) => {
+  const { username } = req.body || {};
+  if (!username) return res.status(400).json({ error: 'username_required' });
   await db.execute({
-    sql: `UPDATE admin_users SET totp_enabled = 0, totp_secret = NULL WHERE id = ?`,
-    args: [req.adminId],
+    sql: `UPDATE admin_users SET totp_enabled = 0, totp_secret = NULL WHERE username = ?`,
+    args: [username],
   });
-  await logAction({ adminId: req.adminId, action: '2fa_disabled', ip: getClientIp(req), userAgent: req.headers['user-agent'] });
+  await logAction({ username, action: '2fa_disabled', ip: getClientIp(req), userAgent: req.headers['user-agent'] });
   res.json({ ok: true });
 });
 
