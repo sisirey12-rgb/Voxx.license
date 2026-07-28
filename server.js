@@ -21,12 +21,14 @@ app.get('/', (req, res) => {
   res.json({ ok: true, service: 'voxx-license-server' });
 });
 
-// /admin/login (public), /admin/logout, /admin/session, /admin/2fa/* —
-// all gated internally by adminAuth (X-Admin-Key), same mechanism as adminRoutes.
+// /admin/login is public (that's how you get a session token in the first
+// place). /admin/logout, /admin/session, /admin/2fa/* are each individually
+// gated by requireSession inside auth.js.
 app.use('/admin', authRoutes);
 
-// Existing admin routes (keys, generate-key, revoke, etc.) — gated by
-// adminAuth (X-Admin-Key) inside admin.js itself.
+// Key/reseller/topup management — every route here requires a live session
+// token (router.use(requireSession) inside admin.js). ADMIN_KEY itself is
+// only ever checked once, server-side, during /admin/login.
 app.use('/admin', adminRoutes);
 
 app.use('/api', licenseRoutes);
