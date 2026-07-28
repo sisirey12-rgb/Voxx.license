@@ -75,9 +75,13 @@ router.post('/logout-all', requireSession, async (req, res) => {
 });
 
 // POST /admin/login  { username, password, totp_code? }
-// ADMIN_KEY is no longer part of login — it's only ever used, separately,
-// by POST /setup-admin below to bootstrap or reset an account. On success
-// this issues a real session token (see authSession.js), not a static key.
+// By the time a request reaches this handler, server.js's adminAuth
+// middleware has already required a correct X-Admin-Key header — so
+// username+password (and TOTP) is the SECOND check, not the only one.
+// ADMIN_KEY is also checked a second, independent way below by
+// POST /setup-admin (as a body field) to bootstrap or reset an account.
+// On success this issues a real session token (see authSession.js), not
+// the static key itself.
 router.post('/login', async (req, res) => {
   const { username, password, totp_code } = req.body || {};
   const ip = getClientIp(req);
