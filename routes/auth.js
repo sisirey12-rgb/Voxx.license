@@ -2,7 +2,7 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const speakeasy = require('speakeasy');
 const qrcode = require('qrcode');
-const db = require('../db');
+const { db } = require('../db');
 const {
   createSession, destroySession, requireSession, setSessionCookie, clearSessionCookie,
 } = require('../middleware/authSession');
