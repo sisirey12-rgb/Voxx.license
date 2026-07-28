@@ -5,6 +5,7 @@ const cookieParser = require('cookie-parser');
 
 const { init } = require('./db');
 const authRoutes = require('./routes/auth');
+const setupAdminRoutes = require('./routes/setup-admin');
 const { requireSession } = require('./middleware/authSession');
 const adminRoutes = require('./routes/admin');
 const licenseRoutes = require('./routes/license');
@@ -27,6 +28,10 @@ app.get('/', (req, res) => {
 
 // Login/logout/session/2fa routes — public, no session required to reach these.
 app.use('/admin', authRoutes);
+
+// TEMPORARY one-time admin bootstrap route — public. DELETE this line and
+// routes/setup-admin.js once you've successfully created your admin account.
+app.use('/admin', setupAdminRoutes);
 
 // Existing admin routes — now also require a valid session cookie,
 // in addition to whatever adminAuth (X-Admin-Key) already checks.
