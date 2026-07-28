@@ -2,7 +2,7 @@
 // Sliding 15-minute expiry: every valid request pushes expires_at forward.
 
 const crypto = require('crypto');
-const db = require('../db');
+const { db } = require('../db');
 
 const SESSION_COOKIE = 'voxx_session';
 const SESSION_MINUTES = 15;
@@ -61,7 +61,7 @@ function setSessionCookie(res, sessionId) {
   res.cookie(SESSION_COOKIE, sessionId, {
     httpOnly: true,
     secure: true,       // requires HTTPS — true on Render/Railway/Fly by default
-    sameSite: 'none', // must be 'none' for cross-site cookies (frontend and backend are on different domains)
+    sameSite: 'none',   // must be 'none' for cross-site cookies (frontend and backend are on different domains)
     maxAge: SESSION_MINUTES * 60 * 1000,
     path: '/',
   });
