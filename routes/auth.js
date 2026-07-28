@@ -3,9 +3,7 @@ const bcrypt = require('bcrypt');
 const speakeasy = require('speakeasy');
 const qrcode = require('qrcode');
 const { db } = require('../db');
-const {
-  createSession, destroySession, requireSession, setSessionCookie, clearSessionCookie,
-} = require('../middleware/authSession');
+const { createSession, destroySession, requireSession } = require('../middleware/authSession');
 const { checkLockout, recordAttempt, logAction, getClientIp } = require('../middleware/security');
 
 const router = express.Router();
@@ -69,17 +67,17 @@ router.post('/login', async (req, res) => {
 
   await recordAttempt(username, ip, true);
   const sessionId = await createSession(user.id, ip, userAgent);
-  setSessionCookie(res, sessionId);
   await logAction({ adminId: user.id, username, action: 'login_success', ip, userAgent });
 
-  res.json({ ok: true });
+  // Token goes in the JSON body, not a cookie — the frontend stores it and
+  // sends it back as `Authorization: Bearer <token>` on every request.
+  res.json({ ok: true, session_token: sessionId });
 });
 
 // POST /admin/logout
 router.post('/logout', requireSession, async (req, res) => {
   const ip = getClientIp(req);
   await destroySession(req.sessionId);
-  clearSessionCookie(res);
   await logAction({ adminId: req.adminId, action: 'logout', ip, userAgent: req.headers['user-agent'] });
   res.json({ ok: true });
 });
