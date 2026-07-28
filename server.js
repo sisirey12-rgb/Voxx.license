@@ -22,24 +22,18 @@ app.get('/', (req, res) => {
   res.json({ ok: true, service: 'voxx-license-server' });
 });
 
-// SECOND LOCK: every single /admin/* route — including /admin/login itself —
-// now requires a valid X-Admin-Key header first, checked against ADMIN_KEY
-// stored in Render's env vars. A correct username+password (even with a
-// valid TOTP code) is no longer enough on its own to reach the login
-// endpoint, let alone the console: without the key, requests are rejected
-// with 401 before username/password is ever looked at or lockout-tracked.
-app.use('/admin', adminAuth);
-
-// /admin/login (past the key gate above) is where you exchange
-// username+password(+TOTP) for a session token. /admin/logout,
-// /admin/session, /admin/2fa/* are each individually gated by requireSession
-// inside auth.js, on top of the key gate above.
+// STEP 1 (login): /admin/login, /admin/logout, /admin/session, /admin/2fa/*
+// need only a valid session — username+password(+TOTP) — with no
+// dependency on ADMIN_KEY at all. /admin/setup-admin (bootstrap/reset) is
+// also in here, gated by its own admin_key body check since there's no
+// account to log into yet on a brand-new server.
 app.use('/admin', authRoutes);
 
-// Key/reseller/topup management — every route here requires BOTH the
-// X-Admin-Key header (checked above) AND a live session token
-// (router.use(requireSession) inside admin.js).
-app.use('/admin', adminRoutes);
+// STEP 2 (connect): every license/reseller/topup route requires BOTH a
+// live session (requireSession, inside admin.js) AND the X-Admin-Key
+// header (adminAuth, checked first here) — this is the second lock, and
+// it only comes into play after a successful login, not before or during it.
+app.use('/admin', adminAuth, adminRoutes);
 
 app.use('/api', licenseRoutes);
 app.use('/reseller', resellerRoutes);
