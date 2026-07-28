@@ -4,25 +4,34 @@ const cors = require('cors');
 const cookieParser = require('cookie-parser');
 
 const { init } = require('./db');
+const authRoutes = require('./routes/auth');
+const { requireSession } = require('./middleware/authSession');
 const adminRoutes = require('./routes/admin');
 const licenseRoutes = require('./routes/license');
 const resellerRoutes = require('./routes/reseller');
 
 const app = express();
 
-app.use(cors({
-  origin: 'https://YOUR-NETLIFY-SITE.netlify.app', // replace with your Netlify URL
-  credentials: true,
-}));
+app.set('trust proxy', 1); // needed on Render/Railway/Fly so req.ip is the real client IP
 
-app.use(cookieParser());
+app.use(cors({
+  origin: 'https://your-frontend.netlify.app', // <-- set this to your actual Netlify URL
+  credentials: true, // required so the browser sends/receives the session cookie
+}));
 app.use(express.json());
+app.use(cookieParser());
 
 app.get('/', (req, res) => {
   res.json({ ok: true, service: 'voxx-license-server' });
 });
 
-app.use('/admin', adminRoutes);
+// Login/logout/session/2fa routes — public, no session required to reach these.
+app.use('/admin', authRoutes);
+
+// Existing admin routes — now also require a valid session cookie,
+// in addition to whatever adminAuth (X-Admin-Key) already checks.
+app.use('/admin', requireSession, adminRoutes);
+
 app.use('/api', licenseRoutes);
 app.use('/reseller', resellerRoutes);
 
