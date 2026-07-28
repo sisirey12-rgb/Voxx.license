@@ -1,9 +1,11 @@
-// Protects EVERY /admin/* route (including /admin/login) with a shared
-// secret — the first of two locks. The second lock is the normal
-// username+password(+TOTP) login in auth.js, which only runs after this
-// middleware passes. The frontend console sends this key in the
-// X-Admin-Key header. Never expose ADMIN_KEY in client-side code shipped
-// to end users — only the console you (the operator) use should hold it.
+// Protects the license/reseller/topup data routes (routes/admin.js) with a
+// shared secret — the second lock, checked only after a session already
+// exists from a normal username+password login. Does NOT guard
+// /admin/login, /admin/logout, /admin/session, or /admin/2fa/* — those are
+// plain session-based and never require this key. The frontend console
+// sends this key in the X-Admin-Key header. Never expose ADMIN_KEY in
+// client-side code shipped to end users — only the console you (the
+// operator) use should hold it.
 const { logAction, getClientIp } = require('./security');
 
 function adminAuth(req, res, next) {
