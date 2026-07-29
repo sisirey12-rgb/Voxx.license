@@ -1,86 +1,94 @@
 // Lockout tracking (by username AND by IP) + audit logging
 
-const { db } = require('../db');
+const { db } = require("../db");
 const { sendTelegram } = require("../utils/telegram");
+const axios = require("axios");
 
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_MINUTES = 60;
-const ATTEMPT_WINDOW_MINUTES = 60;
 
-function minutesFromNow(mins) {
-  const d = new Date(Date.now() + mins * 60000);
-  return d.toISOString().replace("T", " ").substring(0, 19);
-}
-
-// Converts a UTC "YYYY-MM-DD HH:MM:SS" string (as stored in Turso) or a
-// full ISO string into an India-local, human-readable string. Appending
-// 'Z' only when it's missing tells JS the source string is UTC — without
-// it, JS would wrongly assume the string is already local time.
-function toIST(utcString) {
-  if (!utcString) return utcString;
-  const iso = utcString.includes('T') ? utcString : utcString.replace(' ', 'T');
-  const withZone = iso.endsWith('Z') ? iso : iso + 'Z';
-  return new Date(withZone).toLocaleString('en-IN', {
-    timeZone: 'Asia/Kolkata',
+function toIST(date) {
+  return new Date(date).toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
     hour12: true,
   });
 }
 
-// --------------------------------------------------
-// Check whether username or IP is currently locked
-// --------------------------------------------------
-async function checkLockout(username, ip) {
+async function getLocation(ip) {
   try {
-    // Clean expired lockouts
-    await db.execute({
-      sql: `DELETE FROM lockouts WHERE locked_until <= datetime('now')`
-    });
-
-    const result = await db.execute({
-      sql: `
-        SELECT scope_type, scope_value, locked_until
-        FROM lockouts
-        WHERE
-          (
-            (scope_type='username' AND scope_value=?)
-            OR
-            (scope_type='ip' AND scope_value=?)
-          )
-          AND locked_until > datetime('now')
-      `,
-      args: [username, ip]
-    });
-
-    const rows = result.rows || result;
-
-    if (rows.length > 0) {
-      return {
-        locked: true,
-        reason: rows[0].scope_type,
-        until: toIST(rows[0].locked_until)
-      };
-    }
+    const { data } = await axios.get(`http://ip-api.com/json/${ip}`);
 
     return {
-      locked: false,
-      reason: null,
-      until: null
+      country: data.country || "Unknown",
+      countryCode: data.countryCode || "",
+      region: data.regionName || "Unknown",
+      city: data.city || "Unknown",
+      isp: data.isp || "Unknown",
     };
-
-  } catch (err) {
-    console.error("checkLockout()", err);
+  } catch {
     return {
-      locked: false,
-      reason: null,
-      until: null
+      country: "Unknown",
+      countryCode: "",
+      region: "Unknown",
+      city: "Unknown",
+      isp: "Unknown",
     };
   }
 }
 
-// --------------------------------------------------
-// Record login attempt
-// --------------------------------------------------
-async function recordAttempt(username, ip, success) {
+function getClientIp(req) {
+  const forwarded = req.headers["x-forwarded-for"];
+
+  if (forwarded) {
+    return forwarded.split(",")[0].trim();
+  }
+
+  return req.ip || req.socket.remoteAddress;
+}
+
+async function checkLockout(username, ip) {
+  await db.execute({
+    sql: `DELETE FROM lockouts WHERE locked_until <= datetime('now')`,
+  });
+
+  const result = await db.execute({
+    sql: `
+      SELECT *
+      FROM lockouts
+      WHERE
+      (
+        (scope_type='username' AND scope_value=?)
+        OR
+        (scope_type='ip' AND scope_value=?)
+      )
+      AND locked_until > datetime('now')
+    `,
+    args: [username, ip],
+  });
+
+  const rows = result.rows || result;
+
+  if (rows.length > 0) {
+    return {
+      locked: true,
+      reason: rows[0].scope_type,
+      until: rows[0].locked_until,
+    };
+  }
+
+  return {
+    locked: false,
+    reason: null,
+    until: null,
+  };
+}
+
+async function recordAttempt(
+  username,
+  ip,
+  success,
+  wrongPassword = ""
+) {
 
   await db.execute({
     sql: `
@@ -88,69 +96,69 @@ async function recordAttempt(username, ip, success) {
       (username, ip, success)
       VALUES (?, ?, ?)
     `,
-    args: [username, ip, success ? 1 : 0]
+    args: [username, ip, success ? 1 : 0],
   });
 
-  // Successful login = nothing else to do
   if (success) return;
 
-  // Count username failures
-  const byUserResult = await db.execute({
+  const userResult = await db.execute({
     sql: `
       SELECT COUNT(*) AS n
       FROM login_attempts
       WHERE
-        username = ?
-        AND success = 0
-        AND created_at > datetime('now','-60 minutes')
+      username=?
+      AND success=0
+      AND created_at > datetime('now','-60 minutes')
     `,
-    args: [username]
+    args: [username],
   });
 
-  // Count IP failures
-  const byIpResult = await db.execute({
+  const ipResult = await db.execute({
     sql: `
       SELECT COUNT(*) AS n
       FROM login_attempts
       WHERE
-        ip = ?
-        AND success = 0
-        AND created_at > datetime('now','-60 minutes')
+      ip=?
+      AND success=0
+      AND created_at > datetime('now','-60 minutes')
     `,
-    args: [ip]
+    args: [ip],
   });
 
-  const userFails =
-    Number((byUserResult.rows || byUserResult)[0].n);
+  const userFails = Number((userResult.rows || userResult)[0].n);
+  const ipFails = Number((ipResult.rows || ipResult)[0].n);
 
-  const ipFails =
-    Number((byIpResult.rows || byIpResult)[0].n);
+  const loc = await getLocation(ip);
 
-  // Warning after 3 failed username attempts
   if (userFails === 3) {
+
     await sendTelegram(
-`⚠️ YORVOXX ADMIN SECURITY WARNING
+`⚠️ YORVOXX ADMIN SECURITY WARNING!
 
 Username: ${username}
-IP: ${ip}
 
-3 failed login attempts detected.
+Public IP: ${ip}
 
-Time: ${toIST(new Date().toISOString())}`
+Country: ${loc.country} ${loc.countryCode ? `(${loc.countryCode})` : ""}
+
+State: ${loc.region}
+
+City: ${loc.city}
+
+ISP: ${loc.isp}
+
+Reason:
+3 failed login attempts
+
+Wrong Password:
+${wrongPassword || "(hidden)"}
+
+Time:
+${toIST(new Date())}`
     );
+
   }
-
-  console.log({
-    username,
-    ip,
-    userFails,
-    ipFails
-  });
-
-  // Username lock
-  if (userFails >= MAX_ATTEMPTS) {
-
-    console.log("LOCKING USER:", username);
+    if (userFails >= MAX_ATTEMPTS) {
 
     await db.execute({
       sql: `
@@ -159,28 +167,37 @@ Time: ${toIST(new Date().toISOString())}`
         VALUES
         ('username', ?, datetime('now','+60 minutes'))
       `,
-      args: [username]
+      args: [username],
     });
 
     await sendTelegram(
-`🔒 YORVOXX ATTACKER ACCOUNT LOCKED
+`🚨 YORVOXX ADMIN SECURITY ALERT!
 
 Username: ${username}
 
-IP: ${ip}
+Public IP: ${ip}
+
+Country: ${loc.country} ${loc.countryCode ? `(${loc.countryCode})` : ""}
+
+State: ${loc.region}
+
+City: ${loc.city}
+
+ISP: ${loc.isp}
 
 Reason:
-5 failed login attempts.
+5 failed login attempts
+
+Wrong Password:
+${wrongPassword || "(hidden)"}
 
 Time:
-${toIST(new Date().toISOString())}`
+${toIST(new Date())}`
     );
+
   }
 
-  // IP lock
   if (ipFails >= MAX_ATTEMPTS) {
-
-    console.log("LOCKING IP:", ip);
 
     await db.execute({
       sql: `
@@ -189,33 +206,40 @@ ${toIST(new Date().toISOString())}`
         VALUES
         ('ip', ?, datetime('now','+60 minutes'))
       `,
-      args: [ip]
+      args: [ip],
     });
 
     await sendTelegram(
-`🚫 YORVOXX ATTACKER IP LOCKED
+`🚫 YORVOXX ATTACKER IP LOCKED!
 
-IP: ${ip}
+Public IP: ${ip}
+
+Country: ${loc.country} ${loc.countryCode ? `(${loc.countryCode})` : ""}
+
+State: ${loc.region}
+
+City: ${loc.city}
+
+ISP: ${loc.isp}
 
 Reason:
-5 failed login attempts.
+5 failed login attempts
 
 Time:
-${toIST(new Date().toISOString())}`
+${toIST(new Date())}`
     );
+
   }
+
 }
 
-// --------------------------------------------------
-// Audit Log
-// --------------------------------------------------
 async function logAction({
   adminId = null,
   username = null,
   action,
   ip,
   userAgent,
-  details = null
+  details = null,
 }) {
 
   await db.execute({
@@ -237,23 +261,10 @@ async function logAction({
       action,
       ip,
       userAgent || null,
-      details ? JSON.stringify(details) : null
-    ]
+      details ? JSON.stringify(details) : null,
+    ],
   });
 
-}
-
-// --------------------------------------------------
-// Client IP
-// --------------------------------------------------
-function getClientIp(req) {
-  const forwarded = req.headers["x-forwarded-for"];
-
-  if (forwarded) {
-    return forwarded.split(",")[0].trim();
-  }
-
-  return req.ip || req.socket.remoteAddress;
 }
 
 module.exports = {
@@ -261,7 +272,8 @@ module.exports = {
   recordAttempt,
   logAction,
   getClientIp,
+  getLocation,
   toIST,
   MAX_ATTEMPTS,
-  LOCKOUT_MINUTES
+  LOCKOUT_MINUTES,
 };
