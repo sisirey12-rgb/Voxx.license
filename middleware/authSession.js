@@ -34,20 +34,17 @@ function cookieOptions() {
   };
 }
 
-async function createSession(res, adminId, ip, userAgent) {
+// totpVerified: pass false when the account has 2FA enabled and the user
+// hasn't entered their code yet this session — the dashboard shell loads,
+// but requireVerified() blocks every real admin route until they verify
+// inside the dashboard (POST /admin/2fa/verify-login).
+async function createSession(res, adminId, ip, userAgent, totpVerified) {
   const id = newSessionId();
-  console.log('DEBUG createSession adminId=', adminId, 'typeof=', typeof adminId, 'ip=', ip, 'ua=', userAgent);
-  try {
-    const result = await db.execute({
-      sql: `INSERT INTO sessions (id, admin_id, ip, user_agent, expires_at)
-            VALUES (?, ?, ?, ?, ?)`,
-      args: [id, adminId, ip, userAgent || null, minutesFromNow(SESSION_MINUTES)],
-    });
-    console.log('DEBUG createSession INSERT ok, rowsAffected=', result.rowsAffected);
-  } catch (e) {
-    console.error('DEBUG createSession FAILED. adminId was:', adminId, 'error:', e.message);
-    throw e;
-  }
+  await db.execute({
+    sql: `INSERT INTO sessions (id, admin_id, ip, user_agent, expires_at, totp_verified)
+          VALUES (?, ?, ?, ?, ?, ?)`,
+    args: [id, adminId, ip, userAgent || null, minutesFromNow(SESSION_MINUTES), totpVerified ? 1 : 0],
+  });
   res.cookie(COOKIE_NAME, id, cookieOptions());
   return id;
 }
@@ -63,7 +60,7 @@ async function requireSession(req, res, next) {
 
   const now = new Date().toISOString();
   const rows = await db.execute({
-    sql: `SELECT id, admin_id, expires_at FROM sessions WHERE id = ? AND expires_at > ?`,
+    sql: `SELECT id, admin_id, expires_at, totp_verified FROM sessions WHERE id = ? AND expires_at > ?`,
     args: [sessionId, now],
   });
   const hits = rows.rows || rows;
@@ -81,12 +78,31 @@ async function requireSession(req, res, next) {
 
   req.adminId = hits[0].admin_id;
   req.sessionId = sessionId;
+  req.totpVerified = !!hits[0].totp_verified;
   next();
+}
+
+// Sits after requireSession on any route that should actually be blocked
+// until 2FA is verified for THIS session (i.e. everything in admin.js —
+// key/reseller management). Login itself, /admin/session, and
+// /admin/2fa/verify-login stay reachable on an unverified session so the
+// dashboard shell can load and show the "enter your code" step.
+function requireVerified(req, res, next) {
+  if (!req.totpVerified) {
+    return res.status(401).json({ error: 'totp_pending' });
+  }
+  next();
+}
+
+async function markSessionVerified(sessionId) {
+  await db.execute({ sql: `UPDATE sessions SET totp_verified = 1 WHERE id = ?`, args: [sessionId] });
 }
 
 module.exports = {
   createSession,
   destroySession,
   requireSession,
+  requireVerified,
+  markSessionVerified,
   COOKIE_NAME,
 };
