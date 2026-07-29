@@ -112,10 +112,21 @@ async function init() {
       user_agent TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
-      expires_at TEXT NOT NULL
+      expires_at TEXT NOT NULL,
+      totp_verified INTEGER NOT NULL DEFAULT 1
     );
   `);
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);`);
+
+  // Best-effort migration for DBs created before totp_verified existed.
+  // Existing rows default to 1 (already-trusted sessions) since this column
+  // is new — only sessions created after this ships go through the
+  // in-dashboard verification gate.
+  try {
+    await db.execute(`ALTER TABLE sessions ADD COLUMN totp_verified INTEGER NOT NULL DEFAULT 1`);
+  } catch (e) {
+    // Already exists — fine.
+  }
 
   // Audit log.
   await db.execute(`
