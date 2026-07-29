@@ -228,10 +228,9 @@ router.post("/login", async (req, res) => {
     if (lock.locked) {
 
       return res.status(429).json({
-        error: "locked_out",
-        message:
-          `Locked until ${lock.until}`,
-      });
+  error: "locked_out",
+  locked_until: lock.until,
+});
 
     }
 
