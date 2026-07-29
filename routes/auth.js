@@ -76,12 +76,11 @@ router.post('/logout-all', requireSession, async (req, res) => {
 
 // POST /admin/login  { username, password, totp_code? }
 // Standalone: username+password(+TOTP) is the ONLY check here. ADMIN_KEY
-// is not involved in login at all — it's a separate, later gate
-// (middleware/adminAuth.js) that only guards the license/reseller/topup
-// data routes in routes/admin.js, checked after a session already exists.
-// ADMIN_KEY is also checked, independently, by POST /setup-admin below
-// (as a body field) to bootstrap or reset an account. On success this
-// issues a real session token (see authSession.js), not the static key.
+// is not involved in login at all — it's a separate secret, only ever
+// typed manually for POST /setup-admin (bootstrap/reset), and the server
+// never asks the browser to hold or resend it. On success this sets an
+// httpOnly session cookie (see authSession.js) — no token is returned in
+// the response body for the frontend to store.
 router.post('/login', async (req, res) => {
   const { username, password, totp_code } = req.body || {};
   const ip = getClientIp(req);
@@ -140,26 +139,31 @@ router.post('/login', async (req, res) => {
   await recordAttempt(username, ip, true);
   await logAction({ adminId: user.id, username, action: 'login_success', ip, userAgent });
 
-  // Issue a short-lived, revocable session token instead of handing back the
-  // static ADMIN_KEY. The browser never sees ADMIN_KEY after this point —
-  // it only holds this token, which expires in 15 minutes of inactivity and
-  // can be individually revoked (unlike the shared key).
-  const token = await createSession(user.id, ip, userAgent);
-  res.json({ ok: true, token, expires_in_minutes: 15 });
+  // Sets an httpOnly session cookie on the response — the browser never
+  // sees or holds the session id as readable JS state, unlike a Bearer
+  // token. It expires in 15 minutes of inactivity and can be individually
+  // revoked (unlike a shared static key).
+  await createSession(res, user.id, ip, userAgent);
+  res.json({ ok: true, expires_in_minutes: 15, totp_enabled: !!user.totp_enabled });
 });
 
-// POST /admin/logout — deletes the session row server-side, so this exact
-// token stops working immediately (not just when it naturally expires).
+// POST /admin/logout — deletes the session row server-side AND clears the
+// cookie, so this exact session stops working immediately (not just when
+// it naturally expires or the cookie is dropped client-side).
 router.post('/logout', requireSession, async (req, res) => {
-  await destroySession(req.sessionId);
+  await destroySession(req.sessionId, res);
   await logAction({ adminId: req.adminId, action: 'logout', ip: getClientIp(req), userAgent: req.headers['user-agent'] });
   res.json({ ok: true });
 });
 
-// GET /admin/session — frontend calls this on load to check the stored token
-// is still valid. requireSession also slides the expiry forward on success.
-router.get('/session', requireSession, (req, res) => {
-  res.json({ ok: true });
+// GET /admin/session — frontend calls this on load to check the session
+// cookie is still valid, and to know whether 2FA is currently on so the
+// dashboard can show accurate status. requireSession also slides the
+// expiry forward on success.
+router.get('/session', requireSession, async (req, res) => {
+  const rows = await db.execute({ sql: `SELECT totp_enabled FROM admin_users WHERE id = ?`, args: [req.adminId] });
+  const hits = rows.rows || rows;
+  res.json({ ok: true, totp_enabled: !!(hits[0] && hits[0].totp_enabled) });
 });
 
 // --- 2FA management. Now identity comes from the verified session
