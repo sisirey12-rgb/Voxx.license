@@ -12,6 +12,20 @@ function minutesFromNow(mins) {
   return d.toISOString().replace("T", " ").substring(0, 19);
 }
 
+// Converts a UTC "YYYY-MM-DD HH:MM:SS" string (as stored in Turso) or a
+// full ISO string into an India-local, human-readable string. Appending
+// 'Z' only when it's missing tells JS the source string is UTC — without
+// it, JS would wrongly assume the string is already local time.
+function toIST(utcString) {
+  if (!utcString) return utcString;
+  const iso = utcString.includes('T') ? utcString : utcString.replace(' ', 'T');
+  const withZone = iso.endsWith('Z') ? iso : iso + 'Z';
+  return new Date(withZone).toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour12: true,
+  });
+}
+
 // --------------------------------------------------
 // Check whether username or IP is currently locked
 // --------------------------------------------------
@@ -43,7 +57,7 @@ async function checkLockout(username, ip) {
       return {
         locked: true,
         reason: rows[0].scope_type,
-        until: rows[0].locked_until
+        until: toIST(rows[0].locked_until)
       };
     }
 
@@ -111,10 +125,10 @@ async function recordAttempt(username, ip, success) {
 
   const ipFails =
     Number((byIpResult.rows || byIpResult)[0].n);
-  
+
   // Warning after 3 failed username attempts
-if (userFails === 3) {
-  await sendTelegram(
+  if (userFails === 3) {
+    await sendTelegram(
 `⚠️ YORVOXX ADMIN SECURITY WARNING
 
 Username: ${username}
@@ -122,9 +136,9 @@ IP: ${ip}
 
 3 failed login attempts detected.
 
-Time: ${new Date().toLocaleString()}`
-  );
-}
+Time: ${toIST(new Date().toISOString())}`
+    );
+  }
 
   console.log({
     username,
@@ -139,16 +153,16 @@ Time: ${new Date().toLocaleString()}`
     console.log("LOCKING USER:", username);
 
     await db.execute({
-  sql: `
-    INSERT OR REPLACE INTO lockouts
-    (scope_type, scope_value, locked_until)
-    VALUES
-    ('username', ?, datetime('now','+60 minutes'))
-  `,
-  args: [username]
-});
+      sql: `
+        INSERT OR REPLACE INTO lockouts
+        (scope_type, scope_value, locked_until)
+        VALUES
+        ('username', ?, datetime('now','+60 minutes'))
+      `,
+      args: [username]
+    });
 
-await sendTelegram(
+    await sendTelegram(
 `🔒 YORVOXX ATTACKER ACCOUNT LOCKED
 
 Username: ${username}
@@ -159,8 +173,8 @@ Reason:
 5 failed login attempts.
 
 Time:
-${new Date().toLocaleString()}`
-);
+${toIST(new Date().toISOString())}`
+    );
   }
 
   // IP lock
@@ -169,16 +183,16 @@ ${new Date().toLocaleString()}`
     console.log("LOCKING IP:", ip);
 
     await db.execute({
-  sql: `
-    INSERT OR REPLACE INTO lockouts
-    (scope_type, scope_value, locked_until)
-    VALUES
-    ('ip', ?, datetime('now','+60 minutes'))
-  `,
-  args: [ip]
-});
+      sql: `
+        INSERT OR REPLACE INTO lockouts
+        (scope_type, scope_value, locked_until)
+        VALUES
+        ('ip', ?, datetime('now','+60 minutes'))
+      `,
+      args: [ip]
+    });
 
-await sendTelegram(
+    await sendTelegram(
 `🚫 YORVOXX ATTACKER IP LOCKED
 
 IP: ${ip}
@@ -187,8 +201,8 @@ Reason:
 5 failed login attempts.
 
 Time:
-${new Date().toLocaleString()}`
-);
+${toIST(new Date().toISOString())}`
+    );
   }
 }
 
@@ -249,6 +263,7 @@ module.exports = {
   recordAttempt,
   logAction,
   getClientIp,
+  toIST,
   MAX_ATTEMPTS,
   LOCKOUT_MINUTES
 };
