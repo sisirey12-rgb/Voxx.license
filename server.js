@@ -32,6 +32,15 @@ app.use(cors({
 app.use(cookieParser());
 app.use(express.json());
 
+app.get("/debug-ip", (req, res) => {
+  res.json({
+    ip: req.ip,
+    ips: req.ips,
+    xForwardedFor: req.headers["x-forwarded-for"],
+    remoteAddress: req.socket.remoteAddress
+  });
+});
+
 app.get('/', (req, res) => {
   res.json({ ok: true, service: 'voxx-license-server' });
 });
