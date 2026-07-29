@@ -1,123 +1,213 @@
-// Lockout tracking (by username AND by IP, independently) + audit logging.
-// Adjust `db.execute({ sql, args })` calls if your db.js wraps @libsql/client differently.
+// Lockout tracking (by username AND by IP) + audit logging
 
 const { db } = require('../db');
 
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_MINUTES = 60;
-const ATTEMPT_WINDOW_MINUTES = 60; // failures older than this don't count
+const ATTEMPT_WINDOW_MINUTES = 60;
 
 function minutesFromNow(mins) {
-  return new Date(Date.now() + mins * 60000).toISOString();
+  const d = new Date(Date.now() + mins * 60000);
+  return d.toISOString().replace("T", " ").substring(0, 19);
 }
 
-// Returns { locked: bool, reason: 'username'|'ip'|null, until: iso|null }
+// --------------------------------------------------
+// Check whether username or IP is currently locked
+// --------------------------------------------------
 async function checkLockout(username, ip) {
-  const rows = await db.execute({
-  sql: `
-    SELECT scope_type, locked_until
-    FROM lockouts
-    WHERE (
-      (scope_type='username' AND scope_value=?)
-      OR
-      (scope_type='ip' AND scope_value=?)
-    )
-    AND locked_until > datetime('now')
-  `,
-  args: [username, ip],
-});
-  const rows = await db.execute({
-    sql: `SELECT scope_type, locked_until FROM lockouts
-          WHERE ((scope_type = 'username' AND scope_value = ?)
-              OR (scope_type = 'ip' AND scope_value = ?))
-            AND locked_until > ?`,
-    args: [username, ip, now],
-  });
+  try {
+    // Clean expired lockouts
+    await db.execute({
+      sql: `DELETE FROM lockouts WHERE locked_until <= datetime('now')`
+    });
 
-  const hits = rows.rows || rows; // support either libsql shape
-  if (hits.length > 0) {
-    const hit = hits[0];
-    return { locked: true, reason: hit.scope_type, until: hit.locked_until };
+    const result = await db.execute({
+      sql: `
+        SELECT scope_type, scope_value, locked_until
+        FROM lockouts
+        WHERE
+          (
+            (scope_type='username' AND scope_value=?)
+            OR
+            (scope_type='ip' AND scope_value=?)
+          )
+          AND locked_until > datetime('now')
+      `,
+      args: [username, ip]
+    });
+
+    const rows = result.rows || result;
+
+    if (rows.length > 0) {
+      return {
+        locked: true,
+        reason: rows[0].scope_type,
+        until: rows[0].locked_until
+      };
+    }
+
+    return {
+      locked: false,
+      reason: null,
+      until: null
+    };
+
+  } catch (err) {
+    console.error("checkLockout()", err);
+    return {
+      locked: false,
+      reason: null,
+      until: null
+    };
   }
-  return { locked: false, reason: null, until: null };
 }
 
-// Call after every login attempt (success or fail).
+// --------------------------------------------------
+// Record login attempt
+// --------------------------------------------------
 async function recordAttempt(username, ip, success) {
+
   await db.execute({
-    sql: `INSERT INTO login_attempts (username, ip, success) VALUES (?, ?, ?)`,
-    args: [username, ip, success ? 1 : 0],
+    sql: `
+      INSERT INTO login_attempts
+      (username, ip, success)
+      VALUES (?, ?, ?)
+    `,
+    args: [username, ip, success ? 1 : 0]
   });
 
-  if (success) {
-    // Successful login clears any standing failure streak for this pair.
-    return;
-  }
+  // Successful login = nothing else to do
+  if (success) return;
 
-  const [byUser, byIp] = await Promise.all([
-  db.execute({
-    sql: `SELECT COUNT(*) AS n
-          FROM login_attempts
-          WHERE username = ?
-            AND success = 0
-            AND created_at > datetime('now', '-60 minutes')`,
-    args: [username],
-  }),
-  db.execute({
-    sql: `SELECT COUNT(*) AS n
-          FROM login_attempts
-          WHERE ip = ?
-            AND success = 0
-            AND created_at > datetime('now', '-60 minutes')`,
-    args: [ip],
-  }),
-]);
-  const [byUser, byIp] = await Promise.all([
-    db.execute({
-      sql: `SELECT COUNT(*) as n FROM login_attempts
-            WHERE username = ? AND success = 0 AND created_at > ?`,
-      args: [username, since],
-    }),
-    db.execute({
-      sql: `SELECT COUNT(*) as n FROM login_attempts
-            WHERE ip = ? AND success = 0 AND created_at > ?`,
-      args: [ip, since],
-    }),
-  ]);
+  // Count username failures
+  const byUserResult = await db.execute({
+    sql: `
+      SELECT COUNT(*) AS n
+      FROM login_attempts
+      WHERE
+        username = ?
+        AND success = 0
+        AND created_at > datetime('now','-60 minutes')
+    `,
+    args: [username]
+  });
 
-  const userFails = Number((byUser.rows || byUser)[0].n);
-const ipFails = Number((byIp.rows || byIp)[0].n);
-  
+  // Count IP failures
+  const byIpResult = await db.execute({
+    sql: `
+      SELECT COUNT(*) AS n
+      FROM login_attempts
+      WHERE
+        ip = ?
+        AND success = 0
+        AND created_at > datetime('now','-60 minutes')
+    `,
+    args: [ip]
+  });
+
+  const userFails =
+    Number((byUserResult.rows || byUserResult)[0].n);
+
+  const ipFails =
+    Number((byIpResult.rows || byIpResult)[0].n);
+
+  console.log({
+    username,
+    ip,
+    userFails,
+    ipFails
+  });
+
+  // Username lock
   if (userFails >= MAX_ATTEMPTS) {
+
+    console.log("LOCKING USER:", username);
+
     await db.execute({
-      sql: `INSERT INTO lockouts (scope_type, scope_value, locked_until)
-            VALUES ('username', ?, ?)
-            ON CONFLICT(scope_type, scope_value) DO UPDATE SET locked_until = excluded.locked_until`,
-      args: [username, minutesFromNow(LOCKOUT_MINUTES)],
+      sql: `
+        INSERT OR REPLACE INTO lockouts
+        (scope_type, scope_value, locked_until)
+        VALUES
+        ('username', ?, datetime('now','+60 minutes'))
+      `,
+      args: [username]
     });
   }
+
+  // IP lock
   if (ipFails >= MAX_ATTEMPTS) {
+
+    console.log("LOCKING IP:", ip);
+
     await db.execute({
-      sql: `INSERT INTO lockouts (scope_type, scope_value, locked_until)
-            VALUES ('ip', ?, ?)
-            ON CONFLICT(scope_type, scope_value) DO UPDATE SET locked_until = excluded.locked_until`,
-      args: [ip, minutesFromNow(LOCKOUT_MINUTES)],
+      sql: `
+        INSERT OR REPLACE INTO lockouts
+        (scope_type, scope_value, locked_until)
+        VALUES
+        ('ip', ?, datetime('now','+60 minutes'))
+      `,
+      args: [ip]
     });
   }
 }
 
-async function logAction({ adminId = null, username = null, action, ip, userAgent, details = null }) {
+// --------------------------------------------------
+// Audit Log
+// --------------------------------------------------
+async function logAction({
+  adminId = null,
+  username = null,
+  action,
+  ip,
+  userAgent,
+  details = null
+}) {
+
   await db.execute({
-    sql: `INSERT INTO audit_log (admin_id, username, action, ip, user_agent, details)
-          VALUES (?, ?, ?, ?, ?, ?)`,
-    args: [adminId, username, action, ip, userAgent || null, details ? JSON.stringify(details) : null],
+    sql: `
+      INSERT INTO audit_log
+      (
+        admin_id,
+        username,
+        action,
+        ip,
+        user_agent,
+        details
+      )
+      VALUES (?, ?, ?, ?, ?, ?)
+    `,
+    args: [
+      adminId,
+      username,
+      action,
+      ip,
+      userAgent || null,
+      details ? JSON.stringify(details) : null
+    ]
   });
+
 }
 
-// Real client IP even behind Render/Railway/Fly's proxy.
-// Requires app.set('trust proxy', 1) in server.js (see integration notes).
+// --------------------------------------------------
+// Client IP
+// --------------------------------------------------
 function getClientIp(req) {
-  return req.ip || (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress;
+
+  return (
+    req.ip ||
+    (req.headers["x-forwarded-for"] || "")
+      .split(",")[0]
+      .trim() ||
+    req.socket.remoteAddress
+  );
+
 }
 
-module.exports = { checkLockout, recordAttempt, logAction, getClientIp, MAX_ATTEMPTS, LOCKOUT_MINUTES };
+module.exports = {
+  checkLockout,
+  recordAttempt,
+  logAction,
+  getClientIp,
+  MAX_ATTEMPTS,
+  LOCKOUT_MINUTES
+};
