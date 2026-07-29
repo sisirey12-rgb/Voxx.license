@@ -35,4 +35,13 @@ function computeStatus(lic) {
   return 'active';
 }
 
-module.exports = { generateKeyString, generateResellerToken, addDaysISO, nowISO, daysLeft, computeStatus };
+// Wraps an async Express route handler so a thrown/rejected error is passed
+// to next(err) instead of becoming an unhandled rejection that can crash
+// the whole process. Use as: router.get('/x', asyncHandler(async (req,res)=>{...}))
+function asyncHandler(fn) {
+  return function (req, res, next) {
+    Promise.resolve(fn(req, res, next)).catch(next);
+  };
+}
+
+module.exports = { generateKeyString, generateResellerToken, addDaysISO, nowISO, daysLeft, computeStatus, asyncHandler };
