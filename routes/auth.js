@@ -661,3 +661,172 @@ router.post("/2fa/setup", requireSession, async (req, res) => {
 // CONTINUES:
 //
 // router.post("/2fa/verify", ...
+router.post("/2fa/verify", requireSession, async (req, res) => {
+
+  try {
+
+    const { totp_code } = req.body || {};
+
+    const result = await db.execute({
+      sql: `
+        SELECT
+          username,
+          totp_secret
+        FROM admin_users
+        WHERE id=?
+      `,
+      args: [req.adminId],
+    });
+
+    const rows = result.rows || result;
+
+    if (
+      !rows.length ||
+      !rows[0].totp_secret
+    ) {
+      return res.status(400).json({
+        error: "run_2fa_setup_first",
+      });
+    }
+
+    const ok = speakeasy.totp.verify({
+      secret: rows[0].totp_secret,
+      encoding: "base32",
+      token: totp_code,
+      window: 1,
+    });
+
+    if (!ok) {
+      return res.status(401).json({
+        error: "invalid_totp",
+      });
+    }
+
+    await db.execute({
+      sql: `
+        UPDATE admin_users
+        SET totp_enabled=1
+        WHERE id=?
+      `,
+      args: [req.adminId],
+    });
+
+    const ip = getClientIp(req);
+    const loc = await getLocation(ip);
+
+    await logAction({
+      adminId: req.adminId,
+      username: rows[0].username,
+      action: "2fa_enabled",
+      ip,
+      userAgent: req.headers["user-agent"],
+    });
+
+    await sendTelegram(
+`🔐 VOXX 2FA ENABLED
+
+Username: ${rows[0].username}
+
+Public IP: ${ip}
+
+Country: ${loc.country} ${loc.countryCode ? `(${loc.countryCode})` : ""}
+
+State: ${loc.region}
+
+City: ${loc.city}
+
+ISP: ${loc.isp}
+
+Time:
+${toIST(new Date())}`
+    );
+
+    res.json({
+      ok: true,
+    });
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).json({
+      error: "server_error",
+    });
+
+  }
+
+});
+
+router.post("/2fa/disable", requireSession, async (req, res) => {
+
+  try {
+
+    const result = await db.execute({
+      sql: `
+        SELECT username
+        FROM admin_users
+        WHERE id=?
+      `,
+      args: [req.adminId],
+    });
+
+    const rows = result.rows || result;
+
+    await db.execute({
+      sql: `
+        UPDATE admin_users
+        SET
+          totp_enabled=0,
+          totp_secret=NULL
+        WHERE id=?
+      `,
+      args: [req.adminId],
+    });
+
+    const ip = getClientIp(req);
+    const loc = await getLocation(ip);
+
+    await logAction({
+      adminId: req.adminId,
+      username: rows[0].username,
+      action: "2fa_disabled",
+      ip,
+      userAgent: req.headers["user-agent"],
+    });
+
+    await sendTelegram(
+`🔓 YORVOXX 2FA DISABLED
+
+Username: ${rows[0].username}
+
+Public IP: ${ip}
+
+Country: ${loc.country} ${loc.countryCode ? `(${loc.countryCode})` : ""}
+
+State: ${loc.region}
+
+City: ${loc.city}
+
+ISP: ${loc.isp}
+
+Time:
+${toIST(new Date())}`
+    );
+
+    res.json({
+      ok: true,
+    });
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).json({
+      error: "server_error",
+    });
+
+  }
+
+});
+
+module.exports = router;
