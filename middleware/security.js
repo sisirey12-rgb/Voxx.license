@@ -247,15 +247,13 @@ async function logAction({
 // Client IP
 // --------------------------------------------------
 function getClientIp(req) {
+  const forwarded = req.headers["x-forwarded-for"];
 
-  return (
-    req.ip ||
-    (req.headers["x-forwarded-for"] || "")
-      .split(",")[0]
-      .trim() ||
-    req.socket.remoteAddress
-  );
+  if (forwarded) {
+    return forwarded.split(",")[0].trim();
+  }
 
+  return req.ip || req.socket.remoteAddress;
 }
 
 module.exports = {
