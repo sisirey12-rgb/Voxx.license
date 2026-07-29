@@ -1,6 +1,7 @@
 // Lockout tracking (by username AND by IP) + audit logging
 
 const { db } = require('../db');
+const { sendTelegram } = require("../utils/telegram");
 
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_MINUTES = 60;
@@ -110,6 +111,20 @@ async function recordAttempt(username, ip, success) {
 
   const ipFails =
     Number((byIpResult.rows || byIpResult)[0].n);
+  
+  // Warning after 3 failed username attempts
+if (userFails === 3) {
+  await sendTelegram(
+`⚠️ YORVOXX ADMIN SECURITY WARNING
+
+Username: ${username}
+IP: ${ip}
+
+3 failed login attempts detected.
+
+Time: ${new Date().toLocaleString()}`
+  );
+}
 
   console.log({
     username,
@@ -124,14 +139,28 @@ async function recordAttempt(username, ip, success) {
     console.log("LOCKING USER:", username);
 
     await db.execute({
-      sql: `
-        INSERT OR REPLACE INTO lockouts
-        (scope_type, scope_value, locked_until)
-        VALUES
-        ('username', ?, datetime('now','+60 minutes'))
-      `,
-      args: [username]
-    });
+  sql: `
+    INSERT OR REPLACE INTO lockouts
+    (scope_type, scope_value, locked_until)
+    VALUES
+    ('username', ?, datetime('now','+60 minutes'))
+  `,
+  args: [username]
+});
+
+await sendTelegram(
+`🔒 YORVOXX ATTACKER ACCOUNT LOCKED
+
+Username: ${username}
+
+IP: ${ip}
+
+Reason:
+5 failed login attempts.
+
+Time:
+${new Date().toLocaleString()}`
+);
   }
 
   // IP lock
@@ -140,14 +169,26 @@ async function recordAttempt(username, ip, success) {
     console.log("LOCKING IP:", ip);
 
     await db.execute({
-      sql: `
-        INSERT OR REPLACE INTO lockouts
-        (scope_type, scope_value, locked_until)
-        VALUES
-        ('ip', ?, datetime('now','+60 minutes'))
-      `,
-      args: [ip]
-    });
+  sql: `
+    INSERT OR REPLACE INTO lockouts
+    (scope_type, scope_value, locked_until)
+    VALUES
+    ('ip', ?, datetime('now','+60 minutes'))
+  `,
+  args: [ip]
+});
+
+await sendTelegram(
+`🚫 YORVOXX ATTACKER IP LOCKED
+
+IP: ${ip}
+
+Reason:
+5 failed login attempts.
+
+Time:
+${new Date().toLocaleString()}`
+);
   }
 }
 
