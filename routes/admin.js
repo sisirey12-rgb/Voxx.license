@@ -1,18 +1,26 @@
 const express = require('express');
 const { db } = require('../db');
-const { requireSession } = require('../middleware/authSession');
-const { generateKeyString, generateResellerToken, addDaysISO, nowISO, computeStatus } = require('../helpers');
+const { requireSession, requireVerified } = require('../middleware/authSession');
+const { generateKeyString, generateResellerToken, addDaysISO, nowISO, computeStatus, asyncHandler } = require('../helpers');
 
 const router = express.Router();
 // Every key/reseller/topup route below now requires a live session token
 // (from /admin/login), not the static ADMIN_KEY. A leaked token expires in
 // 15 minutes and can be individually revoked; the old key never expired.
+//
+// requireVerified is the in-dashboard 2FA gate: if the account has 2FA on,
+// a fresh login's session starts unverified, and every route below 401s
+// with totp_pending until the user enters their code via
+// POST /admin/2fa/verify-login (routes/auth.js) — that route (and
+// GET /admin/session) deliberately sit outside this router so the
+// dashboard shell can still load and prompt for the code.
 router.use(requireSession);
+router.use(requireVerified);
 
 // List all keys (console dashboard) — left-joined with resellers so keys
 // generated through a partner's panel are labeled with that partner's name.
 // reseller_name is null for keys you generated yourself via this console.
-router.get('/keys', async (req, res) => {
+router.get('/keys', asyncHandler(async (req, res) => {
   const result = await db.execute(`
     SELECT l.*, r.name AS reseller_name, r.status AS reseller_status
     FROM licenses l
@@ -21,10 +29,10 @@ router.get('/keys', async (req, res) => {
   `);
   const withStatus = result.rows.map(r => ({ ...r, computed_status: computeStatus(r) }));
   res.json({ licenses: withStatus });
-});
+}));
 
 // Generate a new key
-router.post('/generate-key', async (req, res) => {
+router.post('/generate-key', asyncHandler(async (req, res) => {
   const { validity_days = 30, max_devices = 1, label = null, custom_key, license_key: legacyKey } = req.body || {};
   const customKey = (custom_key || legacyKey || '').trim() || null;
 
@@ -58,10 +66,10 @@ router.post('/generate-key', async (req, res) => {
   });
 
   res.json({ license_key, created_at, expires_at, max_devices, label, status: 'active' });
-});
+}));
 
 // Reset HWID — frees the key up to be activated on a new device
-router.post('/reset-hwid', async (req, res) => {
+router.post('/reset-hwid', asyncHandler(async (req, res) => {
   const { license_key } = req.body || {};
   if (!license_key) return res.status(400).json({ error: 'license_key required' });
 
@@ -76,10 +84,10 @@ router.post('/reset-hwid', async (req, res) => {
   await db.execute({ sql: 'DELETE FROM license_devices WHERE license_key = ?', args: [license_key] });
 
   res.json({ success: true });
-});
+}));
 
 // Extend expiry by N days
-router.post('/extend', async (req, res) => {
+router.post('/extend', asyncHandler(async (req, res) => {
   const { license_key, days } = req.body || {};
   if (!license_key || !days) return res.status(400).json({ error: 'license_key and days required' });
 
@@ -94,10 +102,10 @@ router.post('/extend', async (req, res) => {
   await db.execute({ sql: 'UPDATE licenses SET expires_at = ? WHERE license_key = ?', args: [newExpiry, license_key] });
 
   res.json({ success: true, expires_at: newExpiry });
-});
+}));
 
 // Regenerate — swaps in a new key string on the same entry (keeps expiry, label, device limit)
-router.post('/regenerate', async (req, res) => {
+router.post('/regenerate', asyncHandler(async (req, res) => {
   const { license_key } = req.body || {};
   if (!license_key) return res.status(400).json({ error: 'license_key required' });
 
@@ -110,22 +118,20 @@ router.post('/regenerate', async (req, res) => {
 
   const newKey = generateKeyString();
 
-  // Update the same row's key in place — no duplicate/orphaned entry left behind.
   await db.execute({
     sql: 'UPDATE licenses SET license_key = ? WHERE license_key = ?',
     args: [newKey, license_key],
   });
-  // Keep any bound-device history pointed at the new key string.
   await db.execute({
     sql: 'UPDATE license_devices SET license_key = ? WHERE license_key = ?',
     args: [newKey, license_key],
   });
 
   res.json({ success: true, new_license_key: newKey });
-});
+}));
 
 // Revoke a key
-router.post('/revoke', async (req, res) => {
+router.post('/revoke', asyncHandler(async (req, res) => {
   const { license_key } = req.body || {};
   if (!license_key) return res.status(400).json({ error: 'license_key required' });
 
@@ -136,10 +142,10 @@ router.post('/revoke', async (req, res) => {
   if (result.rowsAffected === 0) return res.status(404).json({ error: 'license_key not found' });
 
   res.json({ success: true });
-});
+}));
 
 // Permanently delete one key (and its device-binding history)
-router.post('/delete-key', async (req, res) => {
+router.post('/delete-key', asyncHandler(async (req, res) => {
   const { license_key } = req.body || {};
   if (!license_key) return res.status(400).json({ error: 'license_key required' });
 
@@ -148,10 +154,10 @@ router.post('/delete-key', async (req, res) => {
   if (result.rowsAffected === 0) return res.status(404).json({ error: 'license_key not found' });
 
   res.json({ success: true });
-});
+}));
 
 // Permanently delete every revoked key (leaves active/expiring/expired keys alone)
-router.post('/delete-revoked', async (req, res) => {
+router.post('/delete-revoked', asyncHandler(async (req, res) => {
   await db.execute(`
     DELETE FROM license_devices WHERE license_key IN (
       SELECT license_key FROM licenses WHERE status = 'revoked'
@@ -160,14 +166,14 @@ router.post('/delete-revoked', async (req, res) => {
   const result = await db.execute(`DELETE FROM licenses WHERE status = 'revoked'`);
 
   res.json({ success: true, deleted: result.rowsAffected });
-});
+}));
 
 // ---- Reseller management ----
 
 // List all resellers, most recently created first — includes each
 // reseller's total keys sold, currently-active keys, and days since they
 // were created (the console uses these for the sales-count/rate display).
-router.get('/resellers', async (req, res) => {
+router.get('/resellers', asyncHandler(async (req, res) => {
   const resellersResult = await db.execute('SELECT id, name, credits, status, created_at FROM resellers ORDER BY created_at DESC');
   const licensesResult = await db.execute('SELECT reseller_id, status, expires_at FROM licenses WHERE reseller_id IS NOT NULL');
 
@@ -192,11 +198,11 @@ router.get('/resellers', async (req, res) => {
   });
 
   res.json({ resellers });
-});
+}));
 
 // Create a new reseller and hand back their token once — store it safely,
 // it's the only time the full token is returned.
-router.post('/resellers', async (req, res) => {
+router.post('/resellers', asyncHandler(async (req, res) => {
   const { name, initial_credits = 0 } = req.body || {};
   if (!name || !name.trim()) return res.status(400).json({ error: 'name required' });
   if (!Number.isFinite(Number(initial_credits)) || Number(initial_credits) < 0) {
@@ -212,10 +218,10 @@ router.post('/resellers', async (req, res) => {
   });
 
   res.json({ id: Number(result.lastInsertRowid), name: name.trim(), token, credits: initial_credits, status: 'active' });
-});
+}));
 
 // Directly adjust a reseller's balance (grant or correct, bypassing the top-up flow).
-router.post('/resellers/:id/adjust-credits', async (req, res) => {
+router.post('/resellers/:id/adjust-credits', asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { delta } = req.body || {};
   if (!Number.isFinite(Number(delta)) || Number(delta) === 0) {
@@ -227,10 +233,10 @@ router.post('/resellers/:id/adjust-credits', async (req, res) => {
 
   const updated = await db.execute({ sql: 'SELECT credits FROM resellers WHERE id = ?', args: [id] });
   res.json({ success: true, credits: updated.rows[0]?.credits });
-});
+}));
 
 // Suspend/reactivate a reseller (suspended tokens are rejected by resellerAuth).
-router.post('/resellers/:id/set-status', async (req, res) => {
+router.post('/resellers/:id/set-status', asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { status } = req.body || {};
   if (!['active', 'suspended'].includes(status)) {
@@ -241,10 +247,28 @@ router.post('/resellers/:id/set-status', async (req, res) => {
   if (result.rowsAffected === 0) return res.status(404).json({ error: 'reseller not found' });
 
   res.json({ success: true });
-});
+}));
+
+// Permanently delete a reseller account. This does NOT delete their past
+// sold licenses (those stay valid for end users) — it only clears
+// reseller_id's referential meaning going forward: past keys will show as
+// "You (admin)" once this reseller no longer exists, since there's no
+// longer a name to join against. Pending/resolved top-up requests tied to
+// this reseller are deleted along with the account. Suspend instead of
+// delete if you want to keep the reseller's name attached to their sales
+// history — delete is meant for accounts created by mistake or truly done.
+router.delete('/resellers/:id', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  await db.execute({ sql: 'DELETE FROM credit_topups WHERE reseller_id = ?', args: [id] });
+  const result = await db.execute({ sql: 'DELETE FROM resellers WHERE id = ?', args: [id] });
+  if (result.rowsAffected === 0) return res.status(404).json({ error: 'reseller not found' });
+
+  res.json({ success: true });
+}));
 
 // A reseller's key-generation history (admin view — any reseller_id).
-router.get('/resellers/:id/sales', async (req, res) => {
+router.get('/resellers/:id/sales', asyncHandler(async (req, res) => {
   const { id } = req.params;
   const result = await db.execute({
     sql: 'SELECT * FROM licenses WHERE reseller_id = ? ORDER BY created_at DESC',
@@ -252,22 +276,22 @@ router.get('/resellers/:id/sales', async (req, res) => {
   });
   const withStatus = result.rows.map(r => ({ ...r, computed_status: computeStatus(r) }));
   res.json({ licenses: withStatus });
-});
+}));
 
 // ---- Credit top-up requests ----
 
 // List top-up requests, optionally filtered by status (?status=pending).
-router.get('/topups', async (req, res) => {
+router.get('/topups', asyncHandler(async (req, res) => {
   const { status } = req.query;
   const sql = status
     ? 'SELECT t.*, r.name AS reseller_name FROM credit_topups t JOIN resellers r ON r.id = t.reseller_id WHERE t.status = ? ORDER BY t.requested_at DESC'
     : 'SELECT t.*, r.name AS reseller_name FROM credit_topups t JOIN resellers r ON r.id = t.reseller_id ORDER BY t.requested_at DESC';
   const result = await db.execute(status ? { sql, args: [status] } : sql);
   res.json({ topups: result.rows });
-});
+}));
 
 // Approve a pending top-up — credits the reseller and marks it resolved.
-router.post('/topups/:id/approve', async (req, res) => {
+router.post('/topups/:id/approve', asyncHandler(async (req, res) => {
   const { id } = req.params;
 
   const topupResult = await db.execute({ sql: 'SELECT * FROM credit_topups WHERE id = ?', args: [id] });
@@ -282,10 +306,10 @@ router.post('/topups/:id/approve', async (req, res) => {
   });
 
   res.json({ success: true });
-});
+}));
 
 // Reject a pending top-up — no credits change.
-router.post('/topups/:id/reject', async (req, res) => {
+router.post('/topups/:id/reject', asyncHandler(async (req, res) => {
   const { id } = req.params;
 
   const topupResult = await db.execute({ sql: 'SELECT * FROM credit_topups WHERE id = ?', args: [id] });
@@ -299,6 +323,6 @@ router.post('/topups/:id/reject', async (req, res) => {
   });
 
   res.json({ success: true });
-});
+}));
 
 module.exports = router;
