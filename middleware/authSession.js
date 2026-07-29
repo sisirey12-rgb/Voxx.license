@@ -17,13 +17,20 @@ function minutesFromNow(mins) {
   return new Date(Date.now() + mins * 60000).toISOString();
 }
 
-async function createSession(adminId, ip, userAgent) {
+async function createSession(res, adminId, ip, userAgent) {
   const id = newSessionId();
-  await db.execute({
-    sql: `INSERT INTO sessions (id, admin_id, ip, user_agent, expires_at)
-          VALUES (?, ?, ?, ?, ?)`,
-    args: [id, adminId, ip, userAgent || null, minutesFromNow(SESSION_MINUTES)],
-  });
+  console.log('DEBUG createSession adminId=', adminId, 'typeof=', typeof adminId);
+  try {
+    await db.execute({
+      sql: `INSERT INTO sessions (id, admin_id, ip, user_agent, expires_at)
+            VALUES (?, ?, ?, ?, ?)`,
+      args: [id, adminId, ip, userAgent || null, minutesFromNow(SESSION_MINUTES)],
+    });
+  } catch (e) {
+    console.error('DEBUG createSession FAILED:', e.message);
+    throw e;
+  }
+  res.cookie(COOKIE_NAME, id, cookieOptions());
   return id;
 }
 
