@@ -1,11 +1,9 @@
-// Protects the license/reseller/topup data routes (routes/admin.js) with a
-// shared secret — the second lock, checked only after a session already
-// exists from a normal username+password login. Does NOT guard
-// /admin/login, /admin/logout, /admin/session, or /admin/2fa/* — those are
-// plain session-based and never require this key. The frontend console
-// sends this key in the X-Admin-Key header. Never expose ADMIN_KEY in
-// client-side code shipped to end users — only the console you (the
-// operator) use should hold it.
+// NOT CURRENTLY WIRED INTO server.js. Left here only as an optional
+// break-glass tool if you ever want to protect a specific route with the
+// static ADMIN_KEY in addition to a session — e.g. an emergency endpoint.
+// The regular /admin/* routes now rely solely on the session cookie
+// (middleware/authSession.js); ADMIN_KEY itself never travels to the
+// browser and is only ever typed manually into POST /setup-admin.
 const { logAction, getClientIp } = require('./security');
 
 function adminAuth(req, res, next) {
