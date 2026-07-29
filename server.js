@@ -11,11 +11,11 @@ const resellerRoutes = require('./routes/reseller');
 
 const app = express();
 
-app.set('trust proxy', 1); // needed on Render/Railway/Fly so req.ip is the real client IP
+app.set('trust proxy', 1);
 
 app.use(cors({
   origin: 'https://admicontrolvoxx.netlify.app',
-  credentials: true, // required so the browser sends/receives the session cookie
+  credentials: true,
 }));
 app.use(cookieParser());
 app.use(express.json());
@@ -24,18 +24,33 @@ app.get('/', (req, res) => {
   res.json({ ok: true, service: 'voxx-license-server' });
 });
 
-// Everything under /admin is now gated by ONE thing: a valid session
-// cookie from username+password(+TOTP) login (requireSession, applied
-// inside auth.js for /logout|/session|/2fa/* and inside admin.js for
-// every license/reseller/topup route). There is no X-Admin-Key check on
-// any of these routes anymore, and the browser is never given ADMIN_KEY —
-// it stays server-side, used only as a manually-typed value for
-// POST /setup-admin (bootstrap/reset), never stored or auto-sent.
 app.use('/admin', authRoutes);
 app.use('/admin', adminRoutes);
 
 app.use('/api', licenseRoutes);
 app.use('/reseller', resellerRoutes);
+
+// Catches any error passed via next(err), or thrown/rejected inside a route
+// that was wrapped with asyncHandler (see helpers.js). Without this, an
+// uncaught error in a route just returns nothing to the client and the
+// process may still crash on the underlying unhandled rejection below —
+// this middleware turns it into a clean JSON 500 instead.
+app.use((err, req, res, next) => {
+  console.error('Unhandled route error:', err);
+  if (res.headersSent) return next(err);
+  res.status(500).json({ error: 'server_error' });
+});
+
+// Last-resort safety net: if something *still* throws outside of Express's
+// request/response cycle (e.g. a stray unawaited promise), log it instead
+// of letting Node's default behavior kill the whole process — so one bad
+// request can no longer take down every other user's session.
+process.on('unhandledRejection', (reason) => {
+  console.error('UNHANDLED REJECTION (server stayed up):', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('UNCAUGHT EXCEPTION (server stayed up):', err);
+});
 
 const PORT = process.env.PORT || 3000;
 
