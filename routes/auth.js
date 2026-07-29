@@ -723,7 +723,7 @@ router.post("/2fa/verify", requireSession, async (req, res) => {
     });
 
     await sendTelegram(
-`🔐 VOXX 2FA ENABLED
+`🔐 YORVOXX 2FA ENABLED
 
 Username: ${rows[0].username}
 
