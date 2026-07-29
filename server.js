@@ -1,9 +1,9 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const cookieParser = require('cookie-parser');
 
 const { init } = require('./db');
-const adminAuth = require('./middleware/adminAuth');
 const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
 const licenseRoutes = require('./routes/license');
@@ -15,25 +15,24 @@ app.set('trust proxy', 1); // needed on Render/Railway/Fly so req.ip is the real
 
 app.use(cors({
   origin: 'https://admicontrolvoxx.netlify.app',
+  credentials: true, // required so the browser sends/receives the session cookie
 }));
+app.use(cookieParser());
 app.use(express.json());
 
 app.get('/', (req, res) => {
   res.json({ ok: true, service: 'voxx-license-server' });
 });
 
-// STEP 1 (login): /admin/login, /admin/logout, /admin/session, /admin/2fa/*
-// need only a valid session — username+password(+TOTP) — with no
-// dependency on ADMIN_KEY at all. /admin/setup-admin (bootstrap/reset) is
-// also in here, gated by its own admin_key body check since there's no
-// account to log into yet on a brand-new server.
+// Everything under /admin is now gated by ONE thing: a valid session
+// cookie from username+password(+TOTP) login (requireSession, applied
+// inside auth.js for /logout|/session|/2fa/* and inside admin.js for
+// every license/reseller/topup route). There is no X-Admin-Key check on
+// any of these routes anymore, and the browser is never given ADMIN_KEY —
+// it stays server-side, used only as a manually-typed value for
+// POST /setup-admin (bootstrap/reset), never stored or auto-sent.
 app.use('/admin', authRoutes);
-
-// STEP 2 (connect): every license/reseller/topup route requires BOTH a
-// live session (requireSession, inside admin.js) AND the X-Admin-Key
-// header (adminAuth, checked first here) — this is the second lock, and
-// it only comes into play after a successful login, not before or during it.
-app.use('/admin', adminAuth, adminRoutes);
+app.use('/admin', adminRoutes);
 
 app.use('/api', licenseRoutes);
 app.use('/reseller', resellerRoutes);
