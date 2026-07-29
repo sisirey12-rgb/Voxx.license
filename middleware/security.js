@@ -13,8 +13,19 @@ function minutesFromNow(mins) {
 
 // Returns { locked: bool, reason: 'username'|'ip'|null, until: iso|null }
 async function checkLockout(username, ip) {
-  const now = new Date().toISOString();
-
+  const rows = await db.execute({
+  sql: `
+    SELECT scope_type, locked_until
+    FROM lockouts
+    WHERE (
+      (scope_type='username' AND scope_value=?)
+      OR
+      (scope_type='ip' AND scope_value=?)
+    )
+    AND locked_until > datetime('now')
+  `,
+  args: [username, ip],
+});
   const rows = await db.execute({
     sql: `SELECT scope_type, locked_until FROM lockouts
           WHERE ((scope_type = 'username' AND scope_value = ?)
@@ -43,8 +54,24 @@ async function recordAttempt(username, ip, success) {
     return;
   }
 
-  const since = new Date(Date.now() - ATTEMPT_WINDOW_MINUTES * 60000).toISOString();
-
+  const [byUser, byIp] = await Promise.all([
+  db.execute({
+    sql: `SELECT COUNT(*) AS n
+          FROM login_attempts
+          WHERE username = ?
+            AND success = 0
+            AND created_at > datetime('now', '-60 minutes')`,
+    args: [username],
+  }),
+  db.execute({
+    sql: `SELECT COUNT(*) AS n
+          FROM login_attempts
+          WHERE ip = ?
+            AND success = 0
+            AND created_at > datetime('now', '-60 minutes')`,
+    args: [ip],
+  }),
+]);
   const [byUser, byIp] = await Promise.all([
     db.execute({
       sql: `SELECT COUNT(*) as n FROM login_attempts
@@ -58,9 +85,9 @@ async function recordAttempt(username, ip, success) {
     }),
   ]);
 
-  const userFails = (byUser.rows || byUser)[0].n;
-  const ipFails = (byIp.rows || byIp)[0].n;
-
+  const userFails = Number((byUser.rows || byUser)[0].n);
+const ipFails = Number((byIp.rows || byIp)[0].n);
+  
   if (userFails >= MAX_ATTEMPTS) {
     await db.execute({
       sql: `INSERT INTO lockouts (scope_type, scope_value, locked_until)
