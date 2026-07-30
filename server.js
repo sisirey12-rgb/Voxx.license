@@ -31,6 +31,13 @@ app.use(cors({
 }));
 app.use(cookieParser());
 app.use(express.json());
+app.use((req, res, next) => {
+  console.log("================================");
+  console.log(req.method, req.originalUrl);
+  console.log("Headers:", req.headers);
+  console.log("Body:", req.body);
+  next();
+});
 
 app.get("/debug-ip", (req, res) => {
   res.json({
