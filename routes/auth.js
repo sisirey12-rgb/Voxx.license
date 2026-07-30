@@ -2,7 +2,7 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const { db } = require('../db');
 const { createSession, destroySession, requireSession } = require('../middleware/authSession');
-const { checkLockout, recordAttempt, logAction, getClientIp, getLocation, toIST } = require('../middleware/security');
+const { checkLockout, recordAttempt, logAction, getClientIp, getLocation, toIST, toVisitorTime } = require('../middleware/security');
 const { sendTelegram } = require('../utils/telegram');
 
 const router = express.Router();
@@ -85,9 +85,13 @@ router.post('/login', async (req, res) => {
 
     const lock = await checkLockout(username, ip);
     if (lock.locked) {
+      // Shown to the person attempting to log in, wherever they are — so
+      // this converts to THEIR timezone (from their IP's geo lookup), not
+      // yours. Telegram alerts to you stay in IST via toIST() elsewhere.
+      const visitorLoc = await getLocation(ip);
       return res.status(429).json({
         error: 'locked_out',
-        message: `Too many failed attempts. Locked until ${toIST(lock.until)}.`,
+        message: `Too many failed attempts. Locked until ${toVisitorTime(lock.until, visitorLoc.timezone)}${visitorLoc.timezone ? ` (${visitorLoc.timezone})` : ''}.`,
       });
     }
 
