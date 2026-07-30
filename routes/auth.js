@@ -2,10 +2,19 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const { db } = require('../db');
 const { createSession, destroySession, requireSession } = require('../middleware/authSession');
-const { checkLockout, recordAttempt, logAction, getClientIp, toIST } = require('../middleware/security');
+const { checkLockout, recordAttempt, logAction, getClientIp, getLocation, toIST } = require('../middleware/security');
 const { sendTelegram } = require('../utils/telegram');
 
 const router = express.Router();
+
+function locationBlock(loc) {
+  return [
+    `Country: ${loc.country} ${loc.countryCode ? `(${loc.countryCode})` : ""}`,
+    `State: ${loc.region}`,
+    `City: ${loc.city}`,
+    `ISP: ${loc.isp}`,
+  ].join('\n\n');
+}
 
 router.post('/setup-admin', async (req, res) => {
   try {
@@ -78,7 +87,7 @@ router.post('/login', async (req, res) => {
     if (lock.locked) {
       return res.status(429).json({
         error: 'locked_out',
-        message: `Too many failed attempts. Locked until ${lock.until}.`,
+        message: `Too many failed attempts. Locked until ${toIST(lock.until)}.`,
       });
     }
 
@@ -89,17 +98,11 @@ router.post('/login', async (req, res) => {
     const hits = rows.rows || rows;
 
     if (hits.length === 0) {
-      await recordAttempt(username, ip, false);
+      // recordAttempt() itself already sends the 3-fail warning / 5-fail
+      // lock Telegram alerts (with geo + wrong password) once thresholds
+      // are hit — no separate alert needed here for a single miss.
+      await recordAttempt(username, ip, false, password);
       await logAction({ username, action: 'login_fail', ip, userAgent, details: { reason: 'no_such_user' } });
-      await sendTelegram(
-`❌ VOXX INVALID LOGIN ATTEMPT
-
-Username: ${username}
-IP: ${ip}
-Reason: no such user
-
-Time: ${toIST(new Date().toISOString())}`
-      );
       return res.status(401).json({ error: 'invalid_credentials' });
     }
 
@@ -107,30 +110,26 @@ Time: ${toIST(new Date().toISOString())}`
     const passwordOk = await bcrypt.compare(password, user.password_hash);
 
     if (!passwordOk) {
-      await recordAttempt(username, ip, false);
+      await recordAttempt(username, ip, false, password);
       await logAction({ adminId: user.id, username, action: 'login_fail', ip, userAgent, details: { reason: 'bad_password' } });
-      await sendTelegram(
-`❌ VOXX INVALID LOGIN ATTEMPT
-
-Username: ${username}
-IP: ${ip}
-Reason: wrong password
-
-Time: ${toIST(new Date().toISOString())}`
-      );
       return res.status(401).json({ error: 'invalid_credentials' });
     }
 
     await recordAttempt(username, ip, true);
     await logAction({ adminId: user.id, username, action: 'login_success', ip, userAgent });
 
+    const loc = await getLocation(ip);
     await sendTelegram(
 `✅ VOXX ADMIN LOGIN
 
 Username: ${username}
-IP: ${ip}
 
-Time: ${toIST(new Date().toISOString())}`
+Public IP: ${ip}
+
+${locationBlock(loc)}
+
+Time:
+${toIST(new Date())}`
     );
 
     // totp_verified is always true now — no second factor to wait on.
@@ -144,15 +143,22 @@ Time: ${toIST(new Date().toISOString())}`
 
 router.post('/logout', requireSession, async (req, res) => {
   try {
+    const ip = getClientIp(req);
     await destroySession(req.sessionId, res);
-    await logAction({ adminId: req.adminId, action: 'logout', ip: getClientIp(req), userAgent: req.headers['user-agent'] });
+    await logAction({ adminId: req.adminId, action: 'logout', ip, userAgent: req.headers['user-agent'] });
+
+    const loc = await getLocation(ip);
     await sendTelegram(
 `🚪 VOXX ADMIN LOGOUT
 
 Admin ID: ${req.adminId}
-IP: ${getClientIp(req)}
 
-Time: ${toIST(new Date().toISOString())}`
+Public IP: ${ip}
+
+${locationBlock(loc)}
+
+Time:
+${toIST(new Date())}`
     );
     res.json({ ok: true });
   } catch (e) {
