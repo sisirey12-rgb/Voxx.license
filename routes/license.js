@@ -3,7 +3,9 @@ const { db } = require('../db');
 const { computeStatus, daysLeft, nowISO } = require('../helpers');
 
 const router = express.Router();
-
+console.log("========== ACTIVATE ==========");
+console.log("Headers:", req.headers);
+console.log("Body:", req.body);
 // Called once from the app's activation screen when the user enters a key.
 router.post('/activate', async (req, res) => {
   const { license_key, hwid } = req.body || {};
