@@ -1,6 +1,6 @@
 const express = require('express');
 const { db } = require('../db');
-const { requireSession, requireVerified } = require('../middleware/authSession');
+const { requireSession } = require('../middleware/authSession');
 const { generateKeyString, generateResellerToken, addDaysISO, nowISO, computeStatus, asyncHandler } = require('../helpers');
 
 const router = express.Router();
@@ -8,14 +8,9 @@ const router = express.Router();
 // (from /admin/login), not the static ADMIN_KEY. A leaked token expires in
 // 15 minutes and can be individually revoked; the old key never expired.
 //
-// requireVerified is the in-dashboard 2FA gate: if the account has 2FA on,
-// a fresh login's session starts unverified, and every route below 401s
-// with totp_pending until the user enters their code via
-// POST /admin/2fa/verify-login (routes/auth.js) — that route (and
-// GET /admin/session) deliberately sit outside this router so the
-// dashboard shell can still load and prompt for the code.
+// 2FA has been removed — a valid session from /admin/login is all that's
+// required to reach these routes now.
 router.use(requireSession);
-router.use(requireVerified);
 
 // List all keys (console dashboard) — left-joined with resellers so keys
 // generated through a partner's panel are labeled with that partner's name.
