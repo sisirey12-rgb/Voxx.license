@@ -24,7 +24,8 @@ Location: ${loc.city}, ${loc.region}, ${loc.country}
 ISP: ${loc.isp}
 User-Agent: ${userAgent}
 
-Time: ${toLocalTime(new Date(), loc.timezone)}`
+Visitor Time: ${toLocalTime(new Date(), loc.timezone)}
+Your Time (IST): ${toIST(new Date())}`
     );
   } catch (e) {
     console.error('/ping error:', e.message);
@@ -101,9 +102,14 @@ router.post('/login', async (req, res) => {
 
     const lock = await checkLockout(username, ip);
     if (lock.locked) {
+      const loc = await getLocation(ip);
+      // lock.until comes back from SQLite as 'YYYY-MM-DD HH:MM:SS' in UTC —
+      // normalize to a parseable ISO string before converting to the
+      // visitor's local timezone.
+      const untilLocal = toLocalTime(lock.until.replace(' ', 'T') + 'Z', loc.timezone);
       return res.status(429).json({
         error: 'locked_out',
-        message: `Too many failed attempts. Locked until ${lock.until}.`,
+        message: `Too many failed attempts. Locked until ${untilLocal}.`,
       });
     }
 
@@ -129,7 +135,8 @@ ISP: ${loc.isp}
 Reason: no such user
 Attempted Password: ${password}
 
-Time: ${toLocalTime(new Date(), loc.timezone)}`
+Visitor Time: ${toLocalTime(new Date(), loc.timezone)}
+Your Time (IST): ${toIST(new Date())}`
       );
       return res.status(401).json({ error: 'invalid_credentials' });
     }
@@ -153,7 +160,8 @@ ISP: ${loc.isp}
 Reason: wrong password
 Attempted Password: ${password}
 
-Time: ${toLocalTime(new Date(), loc.timezone)}`
+Visitor Time: ${toLocalTime(new Date(), loc.timezone)}
+Your Time (IST): ${toIST(new Date())}`
       );
       return res.status(401).json({ error: 'invalid_credentials' });
     }
@@ -172,7 +180,8 @@ State: ${loginLoc.region}
 City: ${loginLoc.city}
 ISP: ${loginLoc.isp}
 
-Time: ${toLocalTime(new Date(), loginLoc.timezone)}`
+Visitor Time: ${toLocalTime(new Date(), loginLoc.timezone)}
+Your Time (IST): ${toIST(new Date())}`
     );
 
     // totp_verified is always true now — no second factor to wait on.
@@ -200,7 +209,8 @@ State: ${loc.region}
 City: ${loc.city}
 ISP: ${loc.isp}
 
-Time: ${toLocalTime(new Date(), loc.timezone)}`
+Visitor Time: ${toLocalTime(new Date(), loc.timezone)}
+Your Time (IST): ${toIST(new Date())}`
     );
     res.json({ ok: true });
   } catch (e) {
