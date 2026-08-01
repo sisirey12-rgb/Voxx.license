@@ -39,7 +39,8 @@ Credits: ${req.reseller.credits}
 IP: ${ip}
 Location: ${loc.city}, ${loc.region}, ${loc.country}
 
-Time: ${toLocalTime(new Date(), loc.timezone)}`
+Visitor Time: ${toLocalTime(new Date(), loc.timezone)}
+Your Time (IST): ${toIST(new Date())}`
   ).catch(() => {});
 
   res.json({
@@ -119,7 +120,8 @@ State: ${loc.region}
 City: ${loc.city}
 ISP: ${loc.isp}
 
-Time: ${toLocalTime(new Date(), loc.timezone)}`
+Visitor Time: ${toLocalTime(new Date(), loc.timezone)}
+Your Time (IST): ${toIST(new Date())}`
   ).catch(() => {});
 
   res.json({
