@@ -2,19 +2,35 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const { db } = require('../db');
 const { createSession, destroySession, requireSession } = require('../middleware/authSession');
-const { checkLockout, recordAttempt, logAction, getClientIp, getLocation, toIST, toVisitorTime } = require('../middleware/security');
+const { checkLockout, recordAttempt, logAction, getClientIp, getLocation, toIST } = require('../middleware/security');
 const { sendTelegram } = require('../utils/telegram');
 
 const router = express.Router();
 
-function locationBlock(loc) {
-  return [
-    `Country: ${loc.country} ${loc.countryCode ? `(${loc.countryCode})` : ""}`,
-    `State: ${loc.region}`,
-    `City: ${loc.city}`,
-    `ISP: ${loc.isp}`,
-  ].join('\n\n');
-}
+// GET /admin/ping — called by the admin panel the moment the page loads,
+// before any login attempt. Lets you know whenever someone opens the
+// hosted admin link at all, not just when they try to log in.
+router.get('/ping', async (req, res) => {
+  try {
+    const ip = getClientIp(req);
+    const userAgent = req.headers['user-agent'] || 'unknown';
+    const loc = await getLocation(ip);
+
+    await sendTelegram(
+`👀 VOXX ADMIN PANEL OPENED
+
+IP: ${ip}
+Location: ${loc.city}, ${loc.region}, ${loc.country}
+ISP: ${loc.isp}
+User-Agent: ${userAgent}
+
+Time: ${toIST(new Date())}`
+    );
+  } catch (e) {
+    console.error('/ping error:', e.message);
+  }
+  res.json({ ok: true });
+});
 
 router.post('/setup-admin', async (req, res) => {
   try {
@@ -85,13 +101,9 @@ router.post('/login', async (req, res) => {
 
     const lock = await checkLockout(username, ip);
     if (lock.locked) {
-      // Shown to the person attempting to log in, wherever they are — so
-      // this converts to THEIR timezone (from their IP's geo lookup), not
-      // yours. Telegram alerts to you stay in IST via toIST() elsewhere.
-      const visitorLoc = await getLocation(ip);
       return res.status(429).json({
         error: 'locked_out',
-        message: `Too many failed attempts. Locked until ${toVisitorTime(lock.until, visitorLoc.timezone)}${visitorLoc.timezone ? ` (${visitorLoc.timezone})` : ''}.`,
+        message: `Too many failed attempts. Locked until ${lock.until}.`,
       });
     }
 
@@ -102,11 +114,22 @@ router.post('/login', async (req, res) => {
     const hits = rows.rows || rows;
 
     if (hits.length === 0) {
-      // recordAttempt() itself already sends the 3-fail warning / 5-fail
-      // lock Telegram alerts (with geo + wrong password) once thresholds
-      // are hit — no separate alert needed here for a single miss.
-      await recordAttempt(username, ip, false, password);
+      await recordAttempt(username, ip, false);
       await logAction({ username, action: 'login_fail', ip, userAgent, details: { reason: 'no_such_user' } });
+      const loc = await getLocation(ip);
+      await sendTelegram(
+`❌ VOXX INVALID LOGIN ATTEMPT
+
+Username: ${username}
+IP: ${ip}
+Country: ${loc.country} ${loc.countryCode ? `(${loc.countryCode})` : ''}
+State: ${loc.region}
+City: ${loc.city}
+ISP: ${loc.isp}
+Reason: no such user
+
+Time: ${toIST(new Date().toISOString())}`
+      );
       return res.status(401).json({ error: 'invalid_credentials' });
     }
 
@@ -114,26 +137,40 @@ router.post('/login', async (req, res) => {
     const passwordOk = await bcrypt.compare(password, user.password_hash);
 
     if (!passwordOk) {
-      await recordAttempt(username, ip, false, password);
+      await recordAttempt(username, ip, false);
       await logAction({ adminId: user.id, username, action: 'login_fail', ip, userAgent, details: { reason: 'bad_password' } });
+      const loc = await getLocation(ip);
+      await sendTelegram(
+`❌ VOXX INVALID LOGIN ATTEMPT
+
+Username: ${username}
+IP: ${ip}
+Country: ${loc.country} ${loc.countryCode ? `(${loc.countryCode})` : ''}
+State: ${loc.region}
+City: ${loc.city}
+ISP: ${loc.isp}
+Reason: wrong password
+
+Time: ${toIST(new Date().toISOString())}`
+      );
       return res.status(401).json({ error: 'invalid_credentials' });
     }
 
     await recordAttempt(username, ip, true);
     await logAction({ adminId: user.id, username, action: 'login_success', ip, userAgent });
 
-    const loc = await getLocation(ip);
+    const loginLoc = await getLocation(ip);
     await sendTelegram(
 `✅ VOXX ADMIN LOGIN
 
 Username: ${username}
+IP: ${ip}
+Country: ${loginLoc.country} ${loginLoc.countryCode ? `(${loginLoc.countryCode})` : ''}
+State: ${loginLoc.region}
+City: ${loginLoc.city}
+ISP: ${loginLoc.isp}
 
-Public IP: ${ip}
-
-${locationBlock(loc)}
-
-Time:
-${toIST(new Date())}`
+Time: ${toIST(new Date().toISOString())}`
     );
 
     // totp_verified is always true now — no second factor to wait on.
@@ -147,22 +184,21 @@ ${toIST(new Date())}`
 
 router.post('/logout', requireSession, async (req, res) => {
   try {
-    const ip = getClientIp(req);
     await destroySession(req.sessionId, res);
+    const ip = getClientIp(req);
     await logAction({ adminId: req.adminId, action: 'logout', ip, userAgent: req.headers['user-agent'] });
-
     const loc = await getLocation(ip);
     await sendTelegram(
 `🚪 VOXX ADMIN LOGOUT
 
 Admin ID: ${req.adminId}
+IP: ${ip}
+Country: ${loc.country} ${loc.countryCode ? `(${loc.countryCode})` : ''}
+State: ${loc.region}
+City: ${loc.city}
+ISP: ${loc.isp}
 
-Public IP: ${ip}
-
-${locationBlock(loc)}
-
-Time:
-${toIST(new Date())}`
+Time: ${toIST(new Date().toISOString())}`
     );
     res.json({ ok: true });
   } catch (e) {
