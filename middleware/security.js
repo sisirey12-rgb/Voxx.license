@@ -171,8 +171,11 @@ Reason:
 Wrong Password:
 ${wrongPassword || "(hidden)"}
 
-Time:
-${toLocalTime(new Date(), loc.timezone)}`
+Visitor Time:
+${toLocalTime(new Date(), loc.timezone)}
+
+Your Time (IST):
+${toIST(new Date())}`
     );
 
   }
@@ -209,8 +212,11 @@ Reason:
 Wrong Password:
 ${wrongPassword || "(hidden)"}
 
-Time:
-${toLocalTime(new Date(), loc.timezone)}`
+Visitor Time:
+${toLocalTime(new Date(), loc.timezone)}
+
+Your Time (IST):
+${toIST(new Date())}`
     );
 
   }
@@ -243,8 +249,11 @@ ISP: ${loc.isp}
 Reason:
 5 failed login attempts
 
-Time:
-${toLocalTime(new Date(), loc.timezone)}`
+Visitor Time:
+${toLocalTime(new Date(), loc.timezone)}
+
+Your Time (IST):
+${toIST(new Date())}`
     );
 
   }
