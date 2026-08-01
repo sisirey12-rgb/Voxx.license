@@ -1,3 +1,4 @@
+const UAParser = require("ua-parser-js");
 const express = require('express');
 const bcrypt = require('bcrypt');
 const { db } = require('../db');
@@ -14,6 +15,11 @@ router.get('/ping', async (req, res) => {
   try {
     const ip = getClientIp(req);
     const userAgent = req.headers['user-agent'] || 'unknown';
+    const parser = new UAParser(userAgent);
+
+const browser = `${parser.getBrowser().name || "Unknown"} ${parser.getBrowser().version || ""}`;
+const os = `${parser.getOS().name || "Unknown"} ${parser.getOS().version || ""}`;
+const device = parser.getDevice().model || parser.getDevice().type || "Desktop";
     const loc = await getLocation(ip);
 
     await sendTelegram(
