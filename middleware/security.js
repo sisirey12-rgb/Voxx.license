@@ -14,18 +14,18 @@ function toIST(date) {
   });
 }
 
-// Formats a UTC datetime string/Date in a given IANA timezone (e.g. from
-// getLocation()'s `timezone` field). Falls back to IST if no timezone is
-// known/valid, so callers never have to null-check before using this.
-function toVisitorTime(date, timezone) {
+// Formats a time in the visitor's own timezone (from their IP lookup)
+// instead of always showing IST. Falls back to IST if the timezone is
+// missing or invalid.
+function toLocalTime(date, timezone) {
   try {
-    if (!timezone) return toIST(date);
     return new Date(date).toLocaleString("en-US", {
-      timeZone: timezone,
+      timeZone: timezone || "Asia/Kolkata",
       hour12: true,
+      dateStyle: "short",
+      timeStyle: "medium",
     });
-  } catch (e) {
-    // Invalid/unrecognized IANA zone string — safe fallback.
+  } catch {
     return toIST(date);
   }
 }
@@ -40,7 +40,7 @@ async function getLocation(ip) {
       region: data.regionName || "Unknown",
       city: data.city || "Unknown",
       isp: data.isp || "Unknown",
-      timezone: data.timezone || null,
+      timezone: data.timezone || "Asia/Kolkata",
     };
   } catch {
     return {
@@ -49,7 +49,7 @@ async function getLocation(ip) {
       region: "Unknown",
       city: "Unknown",
       isp: "Unknown",
-      timezone: null,
+      timezone: "Asia/Kolkata",
     };
   }
 }
@@ -90,9 +90,6 @@ async function checkLockout(username, ip) {
     return {
       locked: true,
       reason: rows[0].scope_type,
-      // Raw UTC string on purpose — callers decide which timezone to
-      // display it in (e.g. auth.js converts it to the visitor's own
-      // timezone via toVisitorTime(), using their IP's geo lookup).
       until: rows[0].locked_until,
     };
   }
@@ -175,7 +172,7 @@ Wrong Password:
 ${wrongPassword || "(hidden)"}
 
 Time:
-${toIST(new Date())}`
+${toLocalTime(new Date(), loc.timezone)}`
     );
 
   }
@@ -213,7 +210,7 @@ Wrong Password:
 ${wrongPassword || "(hidden)"}
 
 Time:
-${toIST(new Date())}`
+${toLocalTime(new Date(), loc.timezone)}`
     );
 
   }
@@ -247,7 +244,7 @@ Reason:
 5 failed login attempts
 
 Time:
-${toIST(new Date())}`
+${toLocalTime(new Date(), loc.timezone)}`
     );
 
   }
@@ -295,7 +292,7 @@ module.exports = {
   getClientIp,
   getLocation,
   toIST,
-  toVisitorTime,
+  toLocalTime,
   MAX_ATTEMPTS,
   LOCKOUT_MINUTES,
 };
