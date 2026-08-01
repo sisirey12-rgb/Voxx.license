@@ -1,11 +1,16 @@
 const express = require('express');
 const { db } = require('../db');
 const resellerAuth = require('../middleware/resellerAuth');
-const { generateKeyString, addDaysISO, nowISO, computeStatus, asyncHandler } = require('../helpers');
+const { generateKeyString, addDaysISO, nowISO, computeStatus } = require('../helpers');
+const { sendTelegram } = require('../utils/telegram');
+const { getClientIp, getLocation, toIST } = require('../middleware/security');
 
 const router = express.Router();
 router.use(resellerAuth);
 
+// Matches the pricing shown on the VOXX landing page. Resellers may only
+// generate keys at these exact durations — arbitrary day counts are
+// rejected so the tiered pricing can't be bypassed with an odd value.
 const CREDIT_TIERS = {
   1: 0.5,
   3: 1.0,
@@ -18,19 +23,42 @@ function creditCost(validity_days) {
   return CREDIT_TIERS[Number(validity_days)];
 }
 
-router.get('/me', asyncHandler(async (req, res) => {
+// Balance + basic account info for the partner's dashboard header.
+// Also the first call the dashboard makes on load, so it doubles as a
+// "reseller opened the dashboard" signal — fires every time /me is called,
+// which in practice is once per page load/refresh.
+router.get('/me', async (req, res) => {
+  const ip = getClientIp(req);
+  const loc = await getLocation(ip);
+
+  sendTelegram(
+`🤝 VOXX RESELLER DASHBOARD OPENED
+
+Reseller: ${req.reseller.name}
+Credits: ${req.reseller.credits}
+IP: ${ip}
+Location: ${loc.city}, ${loc.region}, ${loc.country}
+
+Time: ${toIST(new Date())}`
+  ).catch(() => {});
+
   res.json({
     name: req.reseller.name,
     credits: req.reseller.credits,
     status: req.reseller.status,
   });
-}));
+});
 
-router.get('/pricing', asyncHandler(async (req, res) => {
+// The current duration → credit-cost table, so the dashboard always reflects
+// whatever pricing is live on the server instead of a hardcoded copy.
+router.get('/pricing', async (req, res) => {
   res.json({ tiers: CREDIT_TIERS });
-}));
+});
 
-router.post('/generate-key', asyncHandler(async (req, res) => {
+// Generate a key against the reseller's own credit balance.
+// custom_key is intentionally never accepted here — resellers only ever get
+// the standard VOXX-XXXXXXXX format, unlike the admin /generate-key route.
+router.post('/generate-key', async (req, res) => {
   const { validity_days = 30, max_devices = 1, label = null } = req.body || {};
 
   const cost = creditCost(validity_days);
@@ -45,6 +73,8 @@ router.post('/generate-key', asyncHandler(async (req, res) => {
     return res.status(400).json({ error: 'max_devices must be a positive number' });
   }
 
+  // Re-check the live balance right before spending it, so two requests
+  // fired back-to-back can't both succeed off a stale balance.
   const freshResult = await db.execute({
     sql: 'SELECT credits FROM resellers WHERE id = ?',
     args: [req.reseller.id],
@@ -72,6 +102,26 @@ router.post('/generate-key', asyncHandler(async (req, res) => {
     args: [cost, req.reseller.id],
   });
 
+  const ip = getClientIp(req);
+  const loc = await getLocation(ip);
+  sendTelegram(
+`🔑 VOXX RESELLER GENERATED KEY
+
+Reseller: ${req.reseller.name}
+License Key: ${license_key}
+Validity: ${validity_days} day(s)
+Max Devices: ${max_devices}
+Credits Spent: ${cost}
+Credits Remaining: ${currentCredits - cost}
+IP: ${ip}
+Country: ${loc.country} ${loc.countryCode ? `(${loc.countryCode})` : ''}
+State: ${loc.region}
+City: ${loc.city}
+ISP: ${loc.isp}
+
+Time: ${toIST(new Date())}`
+  ).catch(() => {});
+
   res.json({
     license_key,
     created_at,
@@ -82,18 +132,20 @@ router.post('/generate-key', asyncHandler(async (req, res) => {
     credits_spent: cost,
     credits_remaining: currentCredits - cost,
   });
-}));
+});
 
-router.get('/sales', asyncHandler(async (req, res) => {
+// A partner's own generated keys — never exposes other resellers' keys.
+router.get('/sales', async (req, res) => {
   const result = await db.execute({
     sql: 'SELECT * FROM licenses WHERE reseller_id = ? ORDER BY created_at DESC',
     args: [req.reseller.id],
   });
   const withStatus = result.rows.map(r => ({ ...r, computed_status: computeStatus(r) }));
   res.json({ licenses: withStatus });
-}));
+});
 
-router.post('/topup-request', asyncHandler(async (req, res) => {
+// Submit a request to add credits — admin approves it from the control console.
+router.post('/topup-request', async (req, res) => {
   const { amount, note = null } = req.body || {};
   if (!Number.isFinite(Number(amount)) || Number(amount) <= 0) {
     return res.status(400).json({ error: 'amount must be a positive number' });
@@ -109,14 +161,15 @@ router.post('/topup-request', asyncHandler(async (req, res) => {
   });
 
   res.json({ success: true, topup_id: Number(result.lastInsertRowid), status: 'pending' });
-}));
+});
 
-router.get('/topups', asyncHandler(async (req, res) => {
+// A partner's own top-up request history.
+router.get('/topups', async (req, res) => {
   const result = await db.execute({
     sql: 'SELECT * FROM credit_topups WHERE reseller_id = ? ORDER BY requested_at DESC',
     args: [req.reseller.id],
   });
   res.json({ topups: result.rows });
-}));
+});
 
 module.exports = router;
