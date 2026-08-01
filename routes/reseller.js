@@ -3,7 +3,7 @@ const { db } = require('../db');
 const resellerAuth = require('../middleware/resellerAuth');
 const { generateKeyString, addDaysISO, nowISO, computeStatus } = require('../helpers');
 const { sendTelegram } = require('../utils/telegram');
-const { getClientIp, getLocation, toIST } = require('../middleware/security');
+const { getClientIp, getLocation, toIST, toLocalTime } = require('../middleware/security');
 
 const router = express.Router();
 router.use(resellerAuth);
@@ -39,7 +39,7 @@ Credits: ${req.reseller.credits}
 IP: ${ip}
 Location: ${loc.city}, ${loc.region}, ${loc.country}
 
-Time: ${toIST(new Date())}`
+Time: ${toLocalTime(new Date(), loc.timezone)}`
   ).catch(() => {});
 
   res.json({
@@ -119,7 +119,7 @@ State: ${loc.region}
 City: ${loc.city}
 ISP: ${loc.isp}
 
-Time: ${toIST(new Date())}`
+Time: ${toLocalTime(new Date(), loc.timezone)}`
   ).catch(() => {});
 
   res.json({
