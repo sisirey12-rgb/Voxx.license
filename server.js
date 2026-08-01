@@ -15,7 +15,7 @@ app.set('trust proxy', 1);
 
 const allowedOrigins = [
   'https://admicontrolvoxx.netlify.app',
-  'https://getinstafollowersinstant.netlify.app/',
+  'https://getinstafollowersinstant.netlify.app',
   'https://resellerdashboardvoxx.netlify.app',
 ];
 
