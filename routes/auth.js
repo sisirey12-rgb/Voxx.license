@@ -17,16 +17,38 @@ router.get('/ping', async (req, res) => {
     const loc = await getLocation(ip);
 
     await sendTelegram(
-`👀 VOXX ADMIN PANEL OPENED
+`━━━━━━━━━━━━━━━━━━━━━━
+👀 <b>VOXX ADMIN PANEL</b>
+<b>Panel Opened</b>
+━━━━━━━━━━━━━━━━━━━━━━
 
-IP: ${ip}
-Location: ${loc.city}, ${loc.region}, ${loc.country}
-ISP: ${loc.isp}
-User-Agent: ${userAgent}
+🌐 <b>Network</b>
 
-Visitor Time: ${toLocalTime(new Date(), loc.timezone)}
-Your Time (IST): ${toIST(new Date())}`
-    );
+• <b>IP</b>        : <code>${ip}</code>
+• <b>ISP</b>       : ${loc.isp}
+• <b>Country</b>   : ${loc.country}
+• <b>State</b>     : ${loc.region}
+• <b>City</b>      : ${loc.city}
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+💻 <b>Browser</b>
+
+<code>${userAgent}</code>
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+🕒 <b>Time</b>
+
+• <b>Visitor</b> : ${toLocalTime(new Date(), loc.timezone)}
+• <b>Server</b>  : ${toIST(new Date())}
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+🟢 <b>Status</b>
+
+Admin panel page opened.`
+);
   } catch (e) {
     console.error('/ping error:', e.message);
   }
