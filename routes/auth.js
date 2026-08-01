@@ -41,9 +41,6 @@ const device = parser.getDevice().model || parser.getDevice().type || "Desktop";
 • Browser   : ${browser}
 • OS         : ${os}
 • Device     : ${device}
-• Platform   : ${platform}
-• Language   : ${language}
-• Screen     : ${screenWidth} × ${screenHeight}
 
 ━━━━━━━━━━━━━━━━━━━━━━
 
