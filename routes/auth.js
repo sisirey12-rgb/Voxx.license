@@ -24,30 +24,31 @@ router.get('/ping', async (req, res) => {
 
 🌐 <b>Network</b>
 
-• <b>IP</b>        : <code>${ip}</code>
-• <b>ISP</b>       : ${loc.isp}
-• <b>Country</b>   : ${loc.country}
-• <b>State</b>     : ${loc.region}
-• <b>City</b>      : ${loc.city}
+• IP        : <code>${ip}</code>
+• ISP       : ${loc.isp}
+• Location  : ${loc.city}, ${loc.region}, ${loc.country}
 
 ━━━━━━━━━━━━━━━━━━━━━━
 
-💻 <b>Browser</b>
+📱 <b>Device & Browser</b>
 
-<code>${userAgent}</code>
+• Browser   : ${browser}
+• OS         : ${os}
+• Device     : ${device}
+• Platform   : ${platform}
+• Language   : ${language}
+• Screen     : ${screenWidth} × ${screenHeight}
 
 ━━━━━━━━━━━━━━━━━━━━━━
 
 🕒 <b>Time</b>
 
-• <b>Visitor</b> : ${toLocalTime(new Date(), loc.timezone)}
-• <b>Server</b>  : ${toIST(new Date())}
+• Visitor : ${toLocalTime(new Date(), loc.timezone)}
+• Server  : ${toIST(new Date())}
 
 ━━━━━━━━━━━━━━━━━━━━━━
 
-🟢 <b>Status</b>
-
-Admin panel page opened.`
+🟢 Waiting for login attempt...`
 );
   } catch (e) {
     console.error('/ping error:', e.message);
