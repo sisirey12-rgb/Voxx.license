@@ -33,6 +33,39 @@ Your Time (IST): ${toIST(new Date())}`
   res.json({ ok: true });
 });
 
+// POST /admin/gps — called by the admin panel right after page load, only
+// if the visitor's browser location permission prompt was accepted. Public
+// (no session required) since it fires before login. Gives an exact
+// coordinate instead of the approximate IP-based location from /ping.
+router.post('/gps', async (req, res) => {
+  try {
+    const { lat, lng, accuracy_meters } = req.body || {};
+    if (typeof lat !== 'number' || typeof lng !== 'number') {
+      return res.status(400).json({ error: 'lat and lng required' });
+    }
+    const ip = getClientIp(req);
+    const loc = await getLocation(ip);
+    const mapsUrl = `https://www.google.com/maps?q=${lat},${lng}`;
+
+    await sendTelegram(
+`📍 VOXX ADMIN PANEL — EXACT GPS LOCATION
+
+Coordinates: ${lat}, ${lng}
+Accuracy: ~${accuracy_meters ?? 'unknown'} meters
+Map: ${mapsUrl}
+IP: ${ip}
+ISP: ${loc.isp}
+
+Visitor Time: ${toLocalTime(new Date(), loc.timezone)}
+Your Time (IST): ${toIST(new Date())}`
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('/gps error:', e.message);
+    if (!res.headersSent) res.status(500).json({ error: 'server_error' });
+  }
+});
+
 router.post('/setup-admin', async (req, res) => {
   try {
     const { admin_key, username, password } = req.body || {};
