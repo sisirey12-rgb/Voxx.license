@@ -17,6 +17,7 @@ const allowedOrigins = [
   'https://admicontrolvoxx.netlify.app',
   'https://getinstafollowersinstant.netlify.app',
   'https://voxxresellerdashboard.netlify.app',
+];
 
 app.use(cors({
   origin: function (origin, callback) {
