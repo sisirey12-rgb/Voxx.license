@@ -68,12 +68,21 @@ function creditCost(validity_days) {
   return CREDIT_TIERS[Number(validity_days)];
 }
 
-router.get('/ping', async (req, res) => {
+router.post('/ping', async (req, res) => {
   try {
     const ip = getClientIp(req);
     const loc = await getLocation(ip);
+    const { deviceName, androidVersion, screen_res, actual_res, ram, cpu_cores, ua } = req.body || {};
+
     await sendTelegram(
 `👁️ <b>VOXX RESELLER DASHBOARD OPENED</b>
+
+📱 <b>Device</b>
+• Name: ${deviceName || 'Unknown'}
+• OS: ${androidVersion || 'Unknown'}
+• Screen: ${screen_res || '?'} (actual: ${actual_res || '?'})
+• RAM: ${ram || 'Unknown'}
+• CPU: ${cpu_cores || 'Unknown'}
 
 🌐 <b>Network</b>
 • IP: <code>${ip}</code>
@@ -103,7 +112,7 @@ router.get('/me', async (req, res) => {
   const loc = await getLocation(ip);
 
   sendTelegram(
-`🤝 VOXX RESELLER DASHBOARD OPENED
+`🤝 VOXX RESELLER DASHBOARD LOGGED IN
 
 Reseller: ${req.reseller.name}
 Credits: ${req.reseller.credits}
