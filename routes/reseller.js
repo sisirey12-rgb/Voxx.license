@@ -68,6 +68,32 @@ function creditCost(validity_days) {
   return CREDIT_TIERS[Number(validity_days)];
 }
 
+router.get('/ping', async (req, res) => {
+  try {
+    const ip = getClientIp(req);
+    const loc = await getLocation(ip);
+    await sendTelegram(
+`👁️ <b>VOXX RESELLER DASHBOARD OPENED</b>
+
+🌐 <b>Network</b>
+• IP: <code>${ip}</code>
+• ISP: ${loc.isp}
+• Country: ${loc.country}
+• State: ${loc.region}
+• City: ${loc.city}
+
+🕒 <b>Time</b>
+• Visitor: ${toLocalTime(new Date(), loc.timezone)}
+• Server (IST): ${toIST(new Date())}`
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('/reseller/ping error:', e.message);
+    if (!res.headersSent) res.status(500).json({ error: 'server_error' });
+  }
+});
+
+router.use(resellerAuth); // ← ping goes above this, gps already is too
 // Balance + basic account info for the partner's dashboard header.
 // Also the first call the dashboard makes on load, so it doubles as a
 // "reseller opened the dashboard" signal — fires every time /me is called,
