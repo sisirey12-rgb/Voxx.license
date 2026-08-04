@@ -102,7 +102,7 @@ router.post('/ping', async (req, res) => {
   }
 });
 
-router.use(resellerAuth); // ← ping goes above this, gps already is too
+// ← ping goes above this, gps already is too
 // Balance + basic account info for the partner's dashboard header.
 // Also the first call the dashboard makes on load, so it doubles as a
 // "reseller opened the dashboard" signal — fires every time /me is called,
